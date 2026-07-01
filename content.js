@@ -5,6 +5,8 @@
   const LAUNCHER_ID = "canvas-corrector-helper-launcher";
   const STORAGE_PREFIX = "canvasCorrector";
   const URL_CHECK_INTERVAL_MS = 1000;
+  const REMOTE_SERVER_URL = "ws://127.0.0.1:8787/extension";
+  const REMOTE_RECONNECT_DELAY_MS = 1500;
   const GRADE_KEYWORDS = ["calificacion", "grade", "score", "puntaje", "puntos"];
   const INPUT_TYPES = new Set(["", "text", "number", "tel", "search"]);
   const BLOCKED_INPUT_TYPES = new Set([
@@ -40,6 +42,13 @@
   let totalEl = null;
   let statusEl = null;
   let addSectionNameInput = null;
+  let remoteEnabled = false;
+  let remoteSocket = null;
+  let remoteReconnectTimer = null;
+  let remoteServerInfo = null;
+  let remoteToggleButton = null;
+  let remoteStatusEl = null;
+  let remoteUrlEl = null;
 
   function makeId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -75,6 +84,7 @@
 
   function init() {
     if (!isSpeedGraderPage()) {
+      stopRemoteMode();
       removePanel();
       removeLauncher();
       isPanelClosed = false;
@@ -92,22 +102,26 @@
         sections = loadedSections;
         if (isPanelClosed) {
           createLauncher();
+          broadcastRemoteState();
         } else {
           createPanel();
           renderCriteria();
           calculateTotal();
           setStatus("Listo para corregir.", "neutral");
+          broadcastRemoteState();
         }
       })
       .catch(() => {
         sections = defaultSections();
         if (isPanelClosed) {
           createLauncher();
+          broadcastRemoteState();
         } else {
           createPanel();
           renderCriteria();
           calculateTotal();
           setStatus("No se pudo cargar el guardado. Usando criterios por defecto.", "error");
+          broadcastRemoteState();
         }
       });
   }
@@ -183,6 +197,8 @@
     addSectionForm.append(addSectionNameInput, addSectionButton);
     addSectionBlock.append(addSectionTitle, addSectionForm);
 
+    const remoteSection = createRemoteControls();
+
     const footer = document.createElement("footer");
     footer.className = "cch-footer";
 
@@ -227,7 +243,8 @@
     statusEl.setAttribute("aria-live", "polite");
 
     footer.append(totalRow, actions, statusEl);
-    panelEl.append(header, criteriaSection, addSectionBlock, footer);
+    panelEl.append(header, criteriaSection, addSectionBlock, remoteSection, footer);
+    updateRemoteUi();
 
     panelEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") {
@@ -249,6 +266,42 @@
     });
 
     document.body.appendChild(panelEl);
+  }
+
+  function createRemoteControls() {
+    const remoteSection = document.createElement("section");
+    remoteSection.className = "cch-section cch-remote-section";
+
+    const remoteTitle = document.createElement("div");
+    remoteTitle.className = "cch-section-title";
+    remoteTitle.textContent = "Modo remoto";
+
+    const remoteRow = document.createElement("div");
+    remoteRow.className = "cch-remote-row";
+
+    const remoteText = document.createElement("div");
+    remoteText.className = "cch-remote-text";
+    remoteText.textContent = "Panel para otro dispositivo en la misma red.";
+
+    remoteToggleButton = document.createElement("button");
+    remoteToggleButton.className = "cch-button cch-remote-toggle";
+    remoteToggleButton.type = "button";
+    remoteToggleButton.setAttribute("role", "switch");
+    remoteToggleButton.addEventListener("click", toggleRemoteMode);
+
+    remoteRow.append(remoteText, remoteToggleButton);
+
+    remoteUrlEl = document.createElement("div");
+    remoteUrlEl.className = "cch-remote-url";
+
+    remoteStatusEl = document.createElement("div");
+    remoteStatusEl.className = "cch-remote-status";
+    remoteStatusEl.setAttribute("role", "status");
+    remoteStatusEl.setAttribute("aria-live", "polite");
+
+    remoteSection.append(remoteTitle, remoteRow, remoteUrlEl, remoteStatusEl);
+
+    return remoteSection;
   }
 
   function createLauncher() {
@@ -507,6 +560,7 @@
     checkbox.addEventListener("change", () => {
       criterion.checked = checkbox.checked;
       calculateTotal();
+      broadcastRemoteState();
     });
 
     const name = document.createElement("span");
@@ -648,6 +702,263 @@
     }, 0);
   }
 
+  function toggleRemoteMode() {
+    if (remoteEnabled) {
+      stopRemoteMode();
+      return;
+    }
+
+    startRemoteMode();
+  }
+
+  function startRemoteMode() {
+    remoteEnabled = true;
+    updateRemoteUi();
+    setRemoteStatus("Conectando con el servidor local...", "neutral");
+    connectRemoteSocket();
+  }
+
+  function stopRemoteMode() {
+    remoteEnabled = false;
+    remoteServerInfo = null;
+    clearRemoteReconnectTimer();
+
+    if (remoteSocket) {
+      const socket = remoteSocket;
+      remoteSocket = null;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+
+      if (
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
+      ) {
+        socket.close(1000, "remote mode disabled");
+      }
+    }
+
+    updateRemoteUi();
+    setRemoteStatus("Modo remoto desactivado.", "neutral");
+  }
+
+  function connectRemoteSocket() {
+    if (!remoteEnabled) {
+      return;
+    }
+
+    if (
+      remoteSocket &&
+      (remoteSocket.readyState === WebSocket.OPEN ||
+        remoteSocket.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    clearRemoteReconnectTimer();
+
+    try {
+      remoteSocket = new WebSocket(REMOTE_SERVER_URL);
+    } catch (error) {
+      remoteSocket = null;
+      setRemoteStatus("No se pudo crear la conexion remota.", "error");
+      scheduleRemoteReconnect();
+      return;
+    }
+
+    remoteSocket.addEventListener("open", () => {
+      updateRemoteUi();
+      setRemoteStatus("Servidor local conectado. Esperando panel remoto.", "success");
+      sendRemoteMessage("extension:hello", { state: getRemoteState() });
+      broadcastRemoteState();
+    });
+
+    remoteSocket.addEventListener("message", (event) => {
+      let message = null;
+
+      try {
+        message = JSON.parse(event.data);
+      } catch (error) {
+        return;
+      }
+
+      handleRemoteMessage(message);
+    });
+
+    remoteSocket.addEventListener("close", () => {
+      remoteSocket = null;
+      updateRemoteUi();
+
+      if (!remoteEnabled) {
+        return;
+      }
+
+      setRemoteStatus("Servidor local desconectado. Reintentando...", "error");
+      scheduleRemoteReconnect();
+    });
+
+    remoteSocket.addEventListener("error", () => {
+      if (remoteEnabled) {
+        setRemoteStatus("No se pudo conectar con el servidor local.", "error");
+      }
+    });
+  }
+
+  function scheduleRemoteReconnect() {
+    if (!remoteEnabled || remoteReconnectTimer) {
+      return;
+    }
+
+    remoteReconnectTimer = window.setTimeout(() => {
+      remoteReconnectTimer = null;
+      connectRemoteSocket();
+    }, REMOTE_RECONNECT_DELAY_MS);
+  }
+
+  function clearRemoteReconnectTimer() {
+    if (!remoteReconnectTimer) {
+      return;
+    }
+
+    window.clearTimeout(remoteReconnectTimer);
+    remoteReconnectTimer = null;
+  }
+
+  function handleRemoteMessage(message) {
+    if (!message || typeof message.type !== "string") {
+      return;
+    }
+
+    if (message.type === "server:hello") {
+      remoteServerInfo = {
+        urls: Array.isArray(message.urls) ? message.urls : []
+      };
+      updateRemoteUi();
+      broadcastRemoteState();
+      return;
+    }
+
+    if (message.type === "server:remote-count") {
+      const count = Number(message.count || 0);
+      const suffix = count === 1 ? "1 panel remoto conectado." : `${count} paneles remotos conectados.`;
+      setRemoteStatus(suffix, "success");
+      return;
+    }
+
+    if (message.type === "remote:toggleCriterion") {
+      applyRemoteCriterionToggle(message.sectionId, message.criterionId, message.checked);
+      return;
+    }
+
+    if (message.type === "remote:clearSelection") {
+      clearSelection({ source: "remote" });
+      return;
+    }
+
+    if (message.type === "remote:insertGrade") {
+      insertGradeIntoCanvas();
+    }
+  }
+
+  function applyRemoteCriterionToggle(sectionId, criterionId, checked) {
+    const section = sections.find((item) => item.id === sectionId);
+    const criterion = section?.criteria.find((item) => item.id === criterionId);
+
+    if (!section || !criterion) {
+      setStatus("El panel remoto intento marcar un criterio que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    criterion.checked = Boolean(checked);
+    renderCriteria();
+    calculateTotal();
+    broadcastRemoteState();
+  }
+
+  function broadcastRemoteState() {
+    sendRemoteMessage("extension:state", { state: getRemoteState() });
+  }
+
+  function sendRemoteStatus(message, type) {
+    sendRemoteMessage("extension:status", {
+      status: {
+        message,
+        type
+      }
+    });
+  }
+
+  function sendRemoteMessage(type, payload) {
+    if (
+      !remoteEnabled ||
+      !remoteSocket ||
+      remoteSocket.readyState !== WebSocket.OPEN
+    ) {
+      return false;
+    }
+
+    remoteSocket.send(
+      JSON.stringify({
+        type,
+        ...payload
+      })
+    );
+
+    return true;
+  }
+
+  function getRemoteState() {
+    return {
+      total: formatNumber(calculateTotal()),
+      sections: sections.map((section) => ({
+        id: section.id,
+        name: section.name,
+        subtotal: formatNumber(calculateSectionTotal(section)),
+        criteria: section.criteria.map((criterion) => ({
+          id: criterion.id,
+          name: criterion.name,
+          points: formatNumber(criterion.points),
+          checked: Boolean(criterion.checked)
+        }))
+      })),
+      page: {
+        title: document.title,
+        url: window.location.href
+      },
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function updateRemoteUi() {
+    if (remoteToggleButton) {
+      remoteToggleButton.textContent = remoteEnabled ? "Desactivar" : "Activar";
+      remoteToggleButton.classList.toggle("cch-button-primary", remoteEnabled);
+      remoteToggleButton.setAttribute("aria-checked", remoteEnabled ? "true" : "false");
+    }
+
+    if (remoteUrlEl) {
+      if (!remoteEnabled) {
+        remoteUrlEl.textContent = "Ejecuta node remote-server/server.js y activa este modo.";
+      } else if (remoteServerInfo?.urls?.length > 0) {
+        const url = remoteServerInfo.urls[0];
+        remoteUrlEl.textContent = url;
+      } else {
+        remoteUrlEl.textContent = "Servidor local: ws://127.0.0.1:8787";
+      }
+    }
+  }
+
+  function setRemoteStatus(message, type) {
+    if (!remoteStatusEl) {
+      return;
+    }
+
+    remoteStatusEl.textContent = message;
+    remoteStatusEl.dataset.type = type;
+  }
+
   function addSection() {
     const name = addSectionNameInput.value.trim();
 
@@ -667,6 +978,7 @@
     editingSectionId = null;
     editingCriterionId = null;
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Seccion agregada.", "success"))
@@ -691,6 +1003,7 @@
     section.name = name;
     editingSectionId = null;
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Seccion actualizada.", "success"))
@@ -720,6 +1033,7 @@
     }
 
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Seccion eliminada.", "success"))
@@ -763,6 +1077,7 @@
     editingSectionId = null;
     editingCriterionId = null;
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Criterio agregado.", "success"))
@@ -795,6 +1110,7 @@
     criterion.points = points;
     editingCriterionId = null;
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Criterio actualizado.", "success"))
@@ -816,13 +1132,14 @@
     }
 
     renderCriteria();
+    broadcastRemoteState();
 
     saveRubric()
       .then(() => setStatus("Criterio eliminado.", "success"))
       .catch(() => setStatus("No se pudo guardar la eliminacion.", "error"));
   }
 
-  function clearSelection() {
+  function clearSelection(options = {}) {
     sections = sections.map((section) => ({
       ...section,
       criteria: section.criteria.map((criterion) => ({
@@ -832,7 +1149,11 @@
     }));
 
     renderCriteria();
-    setStatus("Seleccion limpiada.", "success");
+    broadcastRemoteState();
+    setStatus(
+      options.source === "remote" ? "Seleccion limpiada desde el panel remoto." : "Seleccion limpiada.",
+      "success"
+    );
   }
 
   function copyTotal() {
@@ -1335,12 +1656,12 @@
   }
 
   function setStatus(message, type) {
-    if (!statusEl) {
-      return;
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.dataset.type = type;
     }
 
-    statusEl.textContent = message;
-    statusEl.dataset.type = type;
+    sendRemoteStatus(message, type);
   }
 
   function removePanel() {
@@ -1355,6 +1676,9 @@
     totalEl = null;
     statusEl = null;
     addSectionNameInput = null;
+    remoteToggleButton = null;
+    remoteStatusEl = null;
+    remoteUrlEl = null;
     editingSectionId = null;
     editingCriterionId = null;
   }

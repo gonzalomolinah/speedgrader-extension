@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Corrector Canvas Remoto</title>
+    <link rel="stylesheet" href="/remote.css">
+  </head>
+  <body>
+    <main class="remote-shell">
+      <header class="remote-header">
+        <div>
+          <h1>Corrector Canvas</h1>
+          <p id="connectionText">Desconectado</p>
+        </div>
+        <strong id="totalValue" class="total-value">0</strong>
+      </header>
+
+      <section class="actions-bar">
+        <button id="insertButton" type="button" disabled>Ingresar en Canvas</button>
+        <button id="clearButton" type="button" disabled>Limpiar</button>
+      </section>
+
+      <section id="statusPanel" class="status-text"></section>
+      <section id="sectionsList" class="sections-list"></section>
+    </main>
+
+    <script src="/remote.js"></script>
+  </body>
+</html>

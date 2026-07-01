@@ -228,6 +228,54 @@
   background: #fbfcfe;
 }
 
+#canvas-corrector-helper-panel .cch-remote-section {
+  background: #fbfcfe;
+}
+
+#canvas-corrector-helper-panel .cch-remote-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+#canvas-corrector-helper-panel .cch-remote-text {
+  min-width: 0;
+  color: #4d5b70;
+  font-size: 12px;
+}
+
+#canvas-corrector-helper-panel .cch-remote-toggle {
+  min-width: 92px;
+}
+
+#canvas-corrector-helper-panel .cch-remote-url {
+  margin-top: 8px;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+  color: #36506f;
+  background: #ffffff;
+  border: 1px solid #dfe5ee;
+  border-radius: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#canvas-corrector-helper-panel .cch-remote-status {
+  min-height: 18px;
+  margin-top: 7px;
+  color: #4d5b70;
+  font-size: 12px;
+}
+
+#canvas-corrector-helper-panel .cch-remote-status[data-type="success"] {
+  color: #17633a;
+}
+
+#canvas-corrector-helper-panel .cch-remote-status[data-type="error"] {
+  color: #a83232;
+}
+
 #canvas-corrector-helper-panel .cch-input {
   width: 100%;
   min-width: 0;
@@ -424,6 +472,7 @@
 
   #canvas-corrector-helper-panel .cch-add-section-form,
   #canvas-corrector-helper-panel .cch-add-criterion-form,
+  #canvas-corrector-helper-panel .cch-remote-row,
   #canvas-corrector-helper-panel .cch-actions {
     grid-template-columns: 1fr;
   }
