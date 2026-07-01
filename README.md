@@ -1,0 +1,2 @@
+# speedgrader-extension
+
