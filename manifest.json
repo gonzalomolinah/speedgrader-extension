@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "description": "Panel flotante para calcular e ingresar puntajes en Canvas SpeedGrader.",
   "permissions": ["storage", "clipboardWrite"],
-  "host_permissions": ["https://cursos.canvas.uc.cl/*"],
+  "host_permissions": [
+    "https://cursos.canvas.uc.cl/*",
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*"
+  ],
   "content_scripts": [
     {
       "matches": ["https://cursos.canvas.uc.cl/*"],

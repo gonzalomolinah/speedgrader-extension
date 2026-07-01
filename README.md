@@ -7,6 +7,8 @@ MVP de extension Chrome Manifest V3 para ayudar a corregir en Canvas SpeedGrader
 - `manifest.json`: configuracion Manifest V3.
 - `content.js`: panel, secciones, criterios, persistencia, calculo, busqueda del input de Canvas e insercion del puntaje.
 - `styles.css`: estilos del panel flotante.
+- `remote-server/server.js`: servidor local para publicar el panel remoto en la red.
+- `remote-server/public/`: HTML, CSS y JS del panel remoto.
 
 ## Instalacion
 
@@ -37,6 +39,28 @@ El boton `Limpiar` desmarca todos los criterios. El boton `Copiar total` copia s
 
 Cuando Canvas muestra una rubrica con campos `Puntaje de criterio`, la extension intenta escribir los subtotales de las secciones en esos campos siguiendo el orden visual de la rubrica. Por ejemplo, `Parte A` se escribe en el primer campo de criterio visible, `Parte B` en el segundo, y asi sucesivamente. Si no hay rubrica visible, solo escribe el total general.
 
+## Modo remoto
+
+El modo remoto permite que otro dispositivo de la misma red vea solo el panel de correccion. Canvas queda abierto solo en el computador principal.
+
+1. En el computador con Canvas abierto, ejecuta:
+
+```text
+node remote-server/server.js
+```
+
+2. Abre SpeedGrader y presiona `Activar` en la seccion `Modo remoto` del panel.
+3. El panel mostrara una URL de red. Abre esa URL desde el otro dispositivo.
+4. Marca criterios desde el dispositivo remoto. El total se sincroniza con el panel de Canvas.
+5. Usa `Ingresar en Canvas` desde el panel remoto para pedirle al navegador principal que escriba los puntajes.
+
+El servidor local usa el puerto `8787` por defecto. Puedes cambiarlo con:
+
+```text
+$env:PORT=8790
+node remote-server/server.js
+```
+
 ## Persistencia
 
 Las secciones y sus criterios se guardan en `chrome.storage.local` usando una key por curso y tarea:
@@ -65,9 +89,12 @@ La seleccion marcada no se guarda: cada carga parte con todos los criterios desm
 - Presionar `Copiar total` y pegar el resultado en un campo de texto temporal.
 - Presionar `Ingresar en Canvas` y confirmar que los subtotales aparecen en los campos de rubrica correctos y que el total general aparece en la casilla correcta.
 - Revisar que la evaluacion no se entrega automaticamente.
+- Ejecutar `node remote-server/server.js`, activar `Modo remoto`, abrir el panel remoto desde otro dispositivo y confirmar que los checkboxes sincronizan el total.
+- Presionar `Ingresar en Canvas` desde el panel remoto y confirmar que la escritura ocurre en el navegador principal.
 
 ## Advertencias
 
 - Prueba primero con cuidado en un caso de bajo riesgo.
 - La extension solo calcula e ingresa el puntaje total; no presiona automaticamente `Entregar evaluacion`.
+- El modo remoto queda disponible para la red local mientras el servidor este corriendo y el toggle este activo. Usalo solo en redes confiables.
 - Si Canvas cambia su HTML, puede que haya que ajustar `findGradeInput()`.
