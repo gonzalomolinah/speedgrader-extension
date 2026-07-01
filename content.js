@@ -854,6 +854,12 @@
       return null;
     }
 
+    const overallGradeMatch = scoredCandidates.find((candidate) => candidate.isOverallGradeInput);
+
+    if (overallGradeMatch) {
+      return overallGradeMatch.input;
+    }
+
     const keywordMatch = scoredCandidates.find(
       (candidate) => candidate.hasAttributeKeyword || candidate.hasNearbyKeyword
     );
@@ -1128,25 +1134,31 @@
   }
 
   function isRubricCriterionInput(input) {
+    const directText = getDirectInputContextText(input);
     const text = getInputContextText(input);
+    const hasExplicitCriterionScore =
+      directText.includes("puntaje de criterio") || directText.includes("criterion score");
     const hasCriterionScoreText =
-      text.includes("puntaje de criterio") ||
-      text.includes("criterion score") ||
-      text.includes("criterio");
+      hasExplicitCriterionScore || directText.includes("criterio");
     const hasPointsLimit =
       /\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text) ||
       text.includes("agregar comentario");
+
+    if (hasExplicitCriterionScore && hasPointsLimit) {
+      return true;
+    }
 
     return hasCriterionScoreText && hasPointsLimit && hasRubricAncestor(input);
   }
 
   function scoreRubricCriterionInput(input) {
+    const directText = getDirectInputContextText(input);
     const text = getInputContextText(input);
     let score = 0;
 
-    if (text.includes("puntaje de criterio")) score += 80;
-    if (text.includes("criterion score")) score += 80;
-    if (text.includes("criterio")) score += 25;
+    if (directText.includes("puntaje de criterio")) score += 80;
+    if (directText.includes("criterion score")) score += 80;
+    if (directText.includes("criterio")) score += 25;
     if (/\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text)) score += 25;
     if (text.includes("agregar comentario")) score += 12;
     if (hasRubricAncestor(input)) score += 25;
@@ -1176,8 +1188,10 @@
     const hasPointsContext = /\/\s*\d+([.,]\d+)?/.test(nearbyText) || nearbyText.includes("pts");
     const isReasonableWidth = rect.width >= 30 && rect.width <= 220;
     const isRightSide = rect.left >= viewportWidth * 0.45 || rect.right >= viewportWidth * 0.6;
+    const isOverallGradeInput = hasOverallGradeContext(input);
     let score = 0;
 
+    if (isOverallGradeInput) score += 160;
     if (hasAttributeKeyword) score += 110;
     if (hasNearbyKeyword) score += 40;
     if (hasPointsContext) score += 24;
@@ -1195,7 +1209,8 @@
       score,
       hasAttributeKeyword,
       hasNearbyKeyword,
-      isRightSide
+      isRightSide,
+      isOverallGradeInput
     };
   }
 
@@ -1271,6 +1286,40 @@
         input.className,
         getNearbyText(input)
       ].join(" ")
+    );
+  }
+
+  function getDirectInputContextText(input) {
+    const parts = [
+      input.getAttribute("aria-label"),
+      input.getAttribute("name"),
+      input.id,
+      input.placeholder,
+      input.title,
+      input.className
+    ];
+
+    if (input.labels) {
+      Array.from(input.labels).forEach((label) => parts.push(label.innerText));
+    }
+
+    const closestLabel = input.closest("label");
+    if (closestLabel) {
+      parts.push(closestLabel.innerText);
+    }
+
+    return normalizeText(parts.join(" "));
+  }
+
+  function hasOverallGradeContext(input) {
+    const text = getDirectInputContextText(input);
+
+    return (
+      text.includes("calificacion de") ||
+      text.includes("calificacion total") ||
+      text.includes("puntaje del instructor") ||
+      text.includes("final grade") ||
+      text.includes("total grade")
     );
   }
 
