@@ -1,6 +1,6 @@
 # Canvas Corrector Helper
 
-MVP de extension Chrome Manifest V3 para ayudar a corregir en Canvas SpeedGrader. Agrega un panel flotante en `https://cursos.canvas.uc.cl/*` cuando la URL contiene `speed_grader`, permite organizar criterios por secciones, calcula subtotales y escribe el total general en el campo visible de calificacion.
+MVP de extension Chrome Manifest V3 para ayudar a corregir en Canvas SpeedGrader. Agrega un panel flotante en `https://cursos.canvas.uc.cl/*` cuando la URL contiene `speed_grader`, permite organizar criterios por secciones, calcula subtotales, escribe subtotales en la rubrica visible cuando existe y escribe el total general en el campo visible de calificacion.
 
 ## Archivos
 
@@ -29,11 +29,13 @@ Si ya tenias la extension cargada, presiona el boton de recargar en la tarjeta d
 3. Dentro de cada seccion, agrega criterios con su puntaje.
 4. Marca los criterios logrados por el estudiante.
 5. Revisa el subtotal de cada seccion y el total general.
-6. Presiona `Ingresar en Canvas` para escribir solo el total general en la casilla de calificacion visible.
+6. Presiona `Ingresar en Canvas` para escribir los subtotales en los campos de rubrica visibles y el total general en la casilla de calificacion visible.
 7. Usa `Cerrar` para ocultar el panel cuando estorbe. Para volver a mostrarlo, presiona `Abrir Corrector Canvas`.
 8. Revisa manualmente el puntaje en Canvas antes de entregar la evaluacion.
 
 El boton `Limpiar` desmarca todos los criterios. El boton `Copiar total` copia solo el numero del total general al portapapeles como respaldo. Cerrar y reabrir el panel no borra la seleccion actual de la pagina.
+
+Cuando Canvas muestra una rubrica con campos `Puntaje de criterio`, la extension intenta escribir los subtotales de las secciones en esos campos siguiendo el orden visual de la rubrica. Por ejemplo, `Parte A` se escribe en el primer campo de criterio visible, `Parte B` en el segundo, y asi sucesivamente. Si no hay rubrica visible, solo escribe el total general.
 
 ## Persistencia
 
@@ -61,7 +63,7 @@ La seleccion marcada no se guarda: cada carga parte con todos los criterios desm
 - Editar y eliminar secciones y criterios, luego recargar para verificar persistencia.
 - Presionar `Limpiar` y confirmar que todos los subtotales vuelven a `0 pts`.
 - Presionar `Copiar total` y pegar el resultado en un campo de texto temporal.
-- Presionar `Ingresar en Canvas` y confirmar que el total general aparece en la casilla correcta.
+- Presionar `Ingresar en Canvas` y confirmar que los subtotales aparecen en los campos de rubrica correctos y que el total general aparece en la casilla correcta.
 - Revisar que la evaluacion no se entrega automaticamente.
 
 ## Advertencias

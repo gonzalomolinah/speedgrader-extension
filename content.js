@@ -846,6 +846,7 @@
   function findGradeInput() {
     const scoredCandidates = Array.from(document.querySelectorAll("input"))
       .filter(isUsableGradeInput)
+      .filter((input) => !isRubricCriterionInput(input))
       .map((input) => scoreGradeInput(input))
       .sort((a, b) => b.score - a.score);
 
@@ -875,8 +876,17 @@
   function insertGradeIntoCanvas() {
     const input = findGradeInput();
     const totalText = formatNumber(calculateTotal());
+    const sectionResult = insertSectionScoresIntoCanvas();
 
     if (!input) {
+      if (sectionResult.written > 0) {
+        setStatus(
+          `Subtotales ingresados (${sectionResult.written}/${sectionResult.expected}). No se encontro el total.`,
+          "error"
+        );
+        return;
+      }
+
       setStatus("No se encontro el input de puntaje visible en SpeedGrader.", "error");
       return;
     }
@@ -884,7 +894,71 @@
     input.focus();
     setNativeValue(input, totalText);
     input.dispatchEvent(new Event("blur", { bubbles: true }));
-    setStatus(`Puntaje ${totalText} ingresado. Revisa antes de entregar.`, "success");
+
+    if (sectionResult.found === 0) {
+      setStatus(`Puntaje ${totalText} ingresado. Revisa antes de entregar.`, "success");
+      return;
+    }
+
+    if (sectionResult.written < sectionResult.expected) {
+      setStatus(
+        `Total ${totalText} ingresado; subtotales ${sectionResult.written}/${sectionResult.expected}.`,
+        "error"
+      );
+      return;
+    }
+
+    setStatus(
+      `Total ${totalText} y ${sectionResult.written} subtotales ingresados. Revisa antes de entregar.`,
+      "success"
+    );
+  }
+
+  function insertSectionScoresIntoCanvas() {
+    const sectionScores = sections
+      .filter((section) => section.criteria.length > 0)
+      .map((section) => ({
+        id: section.id,
+        name: section.name,
+        total: calculateSectionTotal(section)
+      }));
+    const rubricInputs = findRubricCriterionInputs();
+    const count = Math.min(sectionScores.length, rubricInputs.length);
+
+    for (let index = 0; index < count; index += 1) {
+      const value = formatNumber(sectionScores[index].total);
+      const input = rubricInputs[index];
+
+      setNativeValue(input, value);
+      input.dispatchEvent(new Event("blur", { bubbles: true }));
+    }
+
+    return {
+      expected: sectionScores.length,
+      found: rubricInputs.length,
+      written: count
+    };
+  }
+
+  function findRubricCriterionInputs() {
+    return Array.from(document.querySelectorAll("input"))
+      .filter(isUsableRubricCriterionInput)
+      .map((input) => ({
+        input,
+        rect: input.getBoundingClientRect(),
+        score: scoreRubricCriterionInput(input)
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => {
+        const topDiff = a.rect.top - b.rect.top;
+
+        if (Math.abs(topDiff) > 8) {
+          return topDiff;
+        }
+
+        return a.rect.left - b.rect.left;
+      })
+      .map((candidate) => candidate.input);
   }
 
   function setNativeValue(element, value) {
@@ -1035,6 +1109,51 @@
     return isVisible(input);
   }
 
+  function isUsableRubricCriterionInput(input) {
+    if (input.closest(`#${PANEL_ID}`)) {
+      return false;
+    }
+
+    const type = (input.getAttribute("type") || "text").toLowerCase();
+
+    if (BLOCKED_INPUT_TYPES.has(type) || !INPUT_TYPES.has(type)) {
+      return false;
+    }
+
+    if (input.disabled || input.readOnly || input.getAttribute("aria-disabled") === "true") {
+      return false;
+    }
+
+    return isRendered(input) && isRubricCriterionInput(input);
+  }
+
+  function isRubricCriterionInput(input) {
+    const text = getInputContextText(input);
+    const hasCriterionScoreText =
+      text.includes("puntaje de criterio") ||
+      text.includes("criterion score") ||
+      text.includes("criterio");
+    const hasPointsLimit =
+      /\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text) ||
+      text.includes("agregar comentario");
+
+    return hasCriterionScoreText && hasPointsLimit && hasRubricAncestor(input);
+  }
+
+  function scoreRubricCriterionInput(input) {
+    const text = getInputContextText(input);
+    let score = 0;
+
+    if (text.includes("puntaje de criterio")) score += 80;
+    if (text.includes("criterion score")) score += 80;
+    if (text.includes("criterio")) score += 25;
+    if (/\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text)) score += 25;
+    if (text.includes("agregar comentario")) score += 12;
+    if (hasRubricAncestor(input)) score += 25;
+
+    return score;
+  }
+
   function scoreGradeInput(input) {
     const rect = input.getBoundingClientRect();
     const viewportWidth = Math.max(window.innerWidth || 0, 1);
@@ -1085,15 +1204,24 @@
     const rect = element.getBoundingClientRect();
 
     return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      style.opacity !== "0" &&
-      rect.width > 0 &&
-      rect.height > 0 &&
+      isRendered(element) &&
       rect.bottom > 0 &&
       rect.right > 0 &&
       rect.top < window.innerHeight &&
       rect.left < window.innerWidth
+    );
+  }
+
+  function isRendered(element) {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      style.opacity !== "0" &&
+      rect.width > 0 &&
+      rect.height > 0
     );
   }
 
@@ -1130,6 +1258,42 @@
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
+  }
+
+  function getInputContextText(input) {
+    return normalizeText(
+      [
+        input.getAttribute("aria-label"),
+        input.getAttribute("name"),
+        input.id,
+        input.placeholder,
+        input.title,
+        input.className,
+        getNearbyText(input)
+      ].join(" ")
+    );
+  }
+
+  function hasRubricAncestor(input) {
+    let node = input.parentElement;
+    let depth = 0;
+
+    while (node && depth < 8) {
+      const text = normalizeText(
+        [node.id, node.className, node.getAttribute("role"), node.getAttribute("aria-label")].join(
+          " "
+        )
+      );
+
+      if (text.includes("rubric") || text.includes("rubrica") || text.includes("criterio")) {
+        return true;
+      }
+
+      node = node.parentElement;
+      depth += 1;
+    }
+
+    return false;
   }
 
   function hasGradeKeyword(text) {
