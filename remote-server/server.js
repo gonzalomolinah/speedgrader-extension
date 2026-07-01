@@ -135,6 +135,7 @@ function acceptRemote(req, socket) {
 
     if (
       message.type === "remote:toggleCriterion" ||
+      message.type === "remote:toggleSection" ||
       message.type === "remote:clearSelection" ||
       message.type === "remote:insertGrade"
     ) {

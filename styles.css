@@ -176,6 +176,19 @@
   grid-template-columns: 1fr;
 }
 
+#canvas-corrector-helper-panel .cch-section-header[role="checkbox"] {
+  cursor: pointer;
+}
+
+#canvas-corrector-helper-panel .cch-section-header[role="checkbox"]:hover {
+  background: #eef5ff;
+}
+
+#canvas-corrector-helper-panel .cch-section-header[role="checkbox"]:focus-visible {
+  outline: 2px solid rgba(36, 99, 235, 0.24);
+  outline-offset: -2px;
+}
+
 #canvas-corrector-helper-panel .cch-section-header-editing {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }

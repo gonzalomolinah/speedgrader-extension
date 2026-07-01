@@ -573,6 +573,30 @@
       return;
     }
 
+    if (!isEditMode && section.criteria.length > 0) {
+      const selectionState = getSectionSelectionState(section);
+
+      header.setAttribute("role", "checkbox");
+      header.setAttribute("tabindex", "0");
+      header.setAttribute("aria-checked", selectionState);
+      header.setAttribute("aria-label", `Alternar toda la seccion ${section.name}`);
+      header.addEventListener("click", (event) => {
+        if (isInteractiveElement(event.target)) {
+          return;
+        }
+
+        toggleSectionCriteria(section.id);
+      });
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+
+        event.preventDefault();
+        toggleSectionCriteria(section.id);
+      });
+    }
+
     const titleWrap = document.createElement("div");
     titleWrap.className = "cch-section-name-wrap";
 
@@ -691,7 +715,7 @@
         return;
       }
 
-      setCriterionChecked(row, criterion, !criterion.checked);
+      setCriterionChecked(row, section, criterion, !criterion.checked);
     });
     row.addEventListener("keydown", (event) => {
       if (isEditMode || (event.key !== "Enter" && event.key !== " ")) {
@@ -699,7 +723,7 @@
       }
 
       event.preventDefault();
-      setCriterionChecked(row, criterion, !criterion.checked);
+      setCriterionChecked(row, section, criterion, !criterion.checked);
     });
 
     const checkbox = document.createElement("input");
@@ -708,7 +732,7 @@
     checkbox.checked = Boolean(criterion.checked);
     checkbox.setAttribute("aria-label", `Marcar ${criterion.name}`);
     checkbox.addEventListener("change", () => {
-      setCriterionChecked(row, criterion, checkbox.checked);
+      setCriterionChecked(row, section, criterion, checkbox.checked);
     });
 
     const name = document.createElement("span");
@@ -738,7 +762,21 @@
     row.append(checkbox, name, points, editButton, deleteButton);
   }
 
-  function setCriterionChecked(row, criterion, checked) {
+  function getSectionSelectionState(section) {
+    if (section.criteria.length === 0) {
+      return "false";
+    }
+
+    const checkedCount = section.criteria.filter((criterion) => criterion.checked).length;
+
+    if (checkedCount === 0) {
+      return "false";
+    }
+
+    return checkedCount === section.criteria.length ? "true" : "mixed";
+  }
+
+  function setCriterionChecked(row, section, criterion, checked) {
     criterion.checked = Boolean(checked);
 
     const checkbox = row.querySelector(".cch-checkbox");
@@ -748,8 +786,51 @@
 
     row.classList.toggle("cch-criterion-checked", criterion.checked);
     row.setAttribute("aria-checked", String(criterion.checked));
+    updateSectionHeaderSelectionState(row, section);
     calculateTotal();
     broadcastRemoteState();
+  }
+
+  function updateSectionHeaderSelectionState(row, section) {
+    const sectionBlock = row.closest(".cch-section-block");
+    const header = sectionBlock?.querySelector('.cch-section-header[role="checkbox"]');
+
+    if (header) {
+      header.setAttribute("aria-checked", getSectionSelectionState(section));
+    }
+  }
+
+  function toggleSectionCriteria(sectionId) {
+    const section = sections.find((item) => item.id === sectionId);
+
+    if (!section) {
+      setStatus("No se encontro la seccion.", "error");
+      return;
+    }
+
+    const shouldCheck = section.criteria.some((criterion) => !criterion.checked);
+    setSectionCriteriaChecked(section, shouldCheck, { source: "local" });
+  }
+
+  function setSectionCriteriaChecked(section, checked, options = {}) {
+    if (!section.criteria.length) {
+      setStatus("La seccion no tiene criterios.", "neutral");
+      return;
+    }
+
+    const nextChecked = Boolean(checked);
+    section.criteria.forEach((criterion) => {
+      criterion.checked = nextChecked;
+    });
+
+    renderCriteria();
+    broadcastRemoteState();
+
+    const statusMessage = nextChecked ? "Seccion marcada completa." : "Seccion desmarcada.";
+    setStatus(
+      options.source === "remote" ? `${statusMessage} Desde el panel remoto.` : statusMessage,
+      "success"
+    );
   }
 
   function renderEditingCriterionRow(row, section, criterion) {
@@ -1013,6 +1094,11 @@
       return;
     }
 
+    if (message.type === "remote:toggleSection") {
+      applyRemoteSectionToggle(message.sectionId, message.checked);
+      return;
+    }
+
     if (message.type === "remote:clearSelection") {
       clearSelection({ source: "remote" });
       return;
@@ -1037,6 +1123,18 @@
     renderCriteria();
     calculateTotal();
     broadcastRemoteState();
+  }
+
+  function applyRemoteSectionToggle(sectionId, checked) {
+    const section = sections.find((item) => item.id === sectionId);
+
+    if (!section) {
+      setStatus("El panel remoto intento marcar una seccion que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    setSectionCriteriaChecked(section, checked, { source: "remote" });
   }
 
   function broadcastRemoteState() {

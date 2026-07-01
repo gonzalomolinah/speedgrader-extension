@@ -32,6 +32,7 @@ principal; el otro dispositivo actua como control remoto.
 - Permite agregar criterios dentro de cada seccion, con nombre y puntaje.
 - Acepta puntajes enteros y decimales. Tambien acepta coma decimal al guardar.
 - Permite marcar criterios logrados por cada estudiante.
+- Permite marcar o desmarcar una seccion completa desde su encabezado.
 - Calcula el subtotal de cada seccion y el total general.
 - Copia el total al portapapeles como respaldo.
 - Intenta escribir subtotales en los campos visibles de rubrica de Canvas.
@@ -101,7 +102,8 @@ https://cursos.canvas.uc.cl/courses/.../gradebook/speed_grader?assignment_id=...
 7. Dentro de la seccion, agrega criterios con nombre y puntaje.
 8. Desactiva `Editar` para corregir mas rapido.
 9. Marca los criterios logrados por el estudiante. Puedes hacer clic en la fila
-   completa, no solo en la casilla.
+   completa, no solo en la casilla. Tambien puedes hacer clic en el encabezado
+   de una seccion para marcarla o desmarcarla completa.
 10. Revisa el subtotal de cada seccion y el total.
 11. Usa `Limpiar` al cambiar de estudiante o cuando quieras desmarcar todo.
 12. Usa `Copiar total` si quieres pegar el puntaje manualmente.
@@ -383,6 +385,7 @@ panel remoto.
 - Recargar SpeedGrader y confirmar que la pauta persiste.
 - Confirmar que la seleccion marcada no persiste despues de recargar.
 - Marcar criterios haciendo clic en la fila completa.
+- Marcar y desmarcar una seccion completa haciendo clic en su encabezado.
 - Confirmar que subtotales y total se actualizan correctamente.
 - Usar `Limpiar` y confirmar que todo vuelve a cero.
 - Usar `Copiar total` y pegar el valor en un campo temporal.

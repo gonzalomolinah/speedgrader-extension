@@ -128,8 +128,29 @@ function renderState(state) {
     const block = document.createElement("article");
     block.className = "section-block";
 
+    const criteria = Array.isArray(section.criteria) ? section.criteria : [];
+
     const header = document.createElement("header");
     header.className = "section-header";
+
+    if (criteria.length > 0) {
+      header.setAttribute("role", "checkbox");
+      header.setAttribute("tabindex", isSocketReady() ? "0" : "-1");
+      header.setAttribute("aria-checked", getSectionSelectionState(criteria));
+      header.setAttribute("aria-disabled", isSocketReady() ? "false" : "true");
+      header.setAttribute("aria-label", `Alternar toda la seccion ${section.name || "Seccion"}`);
+      header.addEventListener("click", () => {
+        toggleSectionCriteria(section, criteria);
+      });
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+
+        event.preventDefault();
+        toggleSectionCriteria(section, criteria);
+      });
+    }
 
     const name = document.createElement("strong");
     name.className = "section-name";
@@ -141,8 +162,6 @@ function renderState(state) {
 
     header.append(name, subtotal);
     block.appendChild(header);
-
-    const criteria = Array.isArray(section.criteria) ? section.criteria : [];
 
     if (criteria.length === 0) {
       const empty = document.createElement("div");
@@ -189,6 +208,26 @@ function renderCriterion(section, criterion) {
   return row;
 }
 
+function getSectionSelectionState(criteria) {
+  const checkedCount = criteria.filter((criterion) => criterion.checked).length;
+
+  if (checkedCount === 0) {
+    return "false";
+  }
+
+  return checkedCount === criteria.length ? "true" : "mixed";
+}
+
+function toggleSectionCriteria(section, criteria) {
+  const shouldCheck = criteria.some((criterion) => !criterion.checked);
+
+  sendMessage({
+    type: "remote:toggleSection",
+    sectionId: section.id,
+    checked: shouldCheck
+  });
+}
+
 function sendMessage(message) {
   if (!isSocketReady()) {
     setStatus("Panel remoto desconectado.", "error");
@@ -207,6 +246,11 @@ function setActionsEnabled(enabled) {
 
   sectionsList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
     checkbox.disabled = !ready;
+  });
+
+  sectionsList.querySelectorAll('.section-header[role="checkbox"]').forEach((header) => {
+    header.setAttribute("aria-disabled", ready ? "false" : "true");
+    header.setAttribute("tabindex", ready ? "0" : "-1");
   });
 }
 

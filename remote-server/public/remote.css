@@ -163,6 +163,27 @@ input {
   border-bottom: 1px solid #edf0f5;
 }
 
+.section-header[role="checkbox"] {
+  cursor: pointer;
+}
+
+.section-header[role="checkbox"]:hover {
+  background: #eef5ff;
+}
+
+.section-header[role="checkbox"]:focus-visible {
+  outline: 2px solid rgba(36, 99, 235, 0.24);
+  outline-offset: -2px;
+}
+
+.section-header[aria-disabled="true"] {
+  cursor: default;
+}
+
+.section-header[aria-disabled="true"]:hover {
+  background: #f8fafc;
+}
+
 .section-name {
   overflow: hidden;
   font-size: 15px;
