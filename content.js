@@ -36,12 +36,16 @@
   let currentUrl = window.location.href;
   let currentStorageKey = null;
   let isPanelClosed = false;
+  let isEditMode = false;
+  let panelPosition = null;
+  let panelDragState = null;
   let panelEl = null;
   let launcherEl = null;
   let listEl = null;
   let totalEl = null;
   let statusEl = null;
   let addSectionNameInput = null;
+  let editModeCheckbox = null;
   let remoteEnabled = false;
   let remoteSocket = null;
   let remoteReconnectTimer = null;
@@ -136,9 +140,14 @@
     panelEl = document.createElement("aside");
     panelEl.id = PANEL_ID;
     panelEl.setAttribute("aria-label", "Corrector Canvas");
+    panelEl.dataset.editMode = String(isEditMode);
 
     const header = document.createElement("div");
     header.className = "cch-header";
+    header.addEventListener("pointerdown", startPanelDrag);
+    header.addEventListener("pointermove", movePanelDrag);
+    header.addEventListener("pointerup", endPanelDrag);
+    header.addEventListener("pointercancel", endPanelDrag);
 
     const title = document.createElement("h2");
     title.textContent = "Corrector Canvas";
@@ -150,6 +159,21 @@
     badge.className = "cch-badge";
     badge.textContent = "MVP";
 
+    const editModeLabel = document.createElement("label");
+    editModeLabel.className = "cch-edit-mode-label";
+
+    editModeCheckbox = document.createElement("input");
+    editModeCheckbox.type = "checkbox";
+    editModeCheckbox.checked = isEditMode;
+    editModeCheckbox.addEventListener("change", () => {
+      setEditMode(editModeCheckbox.checked);
+    });
+
+    const editModeText = document.createElement("span");
+    editModeText.textContent = "Editar";
+
+    editModeLabel.append(editModeCheckbox, editModeText);
+
     const closeButton = document.createElement("button");
     closeButton.className = "cch-close-button";
     closeButton.type = "button";
@@ -157,7 +181,7 @@
     closeButton.setAttribute("aria-label", "Cerrar Corrector Canvas");
     closeButton.addEventListener("click", closePanel);
 
-    headerActions.append(badge, closeButton);
+    headerActions.append(badge, editModeLabel, closeButton);
     header.append(title, headerActions);
 
     const criteriaSection = document.createElement("section");
@@ -173,7 +197,7 @@
     criteriaSection.append(criteriaTitle, listEl);
 
     const addSectionBlock = document.createElement("section");
-    addSectionBlock.className = "cch-section";
+    addSectionBlock.className = "cch-section cch-edit-only";
 
     const addSectionTitle = document.createElement("div");
     addSectionTitle.className = "cch-section-title";
@@ -266,6 +290,111 @@
     });
 
     document.body.appendChild(panelEl);
+    applyPanelPosition();
+  }
+
+  function setEditMode(enabled) {
+    isEditMode = Boolean(enabled);
+    editingSectionId = null;
+    editingCriterionId = null;
+
+    if (editModeCheckbox) {
+      editModeCheckbox.checked = isEditMode;
+    }
+
+    if (panelEl) {
+      panelEl.dataset.editMode = String(isEditMode);
+    }
+
+    renderCriteria();
+    setStatus(isEditMode ? "Modo edicion activado." : "Modo correccion activado.", "neutral");
+  }
+
+  function startPanelDrag(event) {
+    if (!panelEl || event.button !== 0 || isInteractiveElement(event.target)) {
+      return;
+    }
+
+    const rect = panelEl.getBoundingClientRect();
+
+    panelDragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+
+    panelEl.classList.add("cch-dragging");
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function movePanelDrag(event) {
+    if (!panelEl || !panelDragState || event.pointerId !== panelDragState.pointerId) {
+      return;
+    }
+
+    const left = panelDragState.startLeft + event.clientX - panelDragState.startX;
+    const top = panelDragState.startTop + event.clientY - panelDragState.startY;
+
+    panelPosition = clampPanelPosition(left, top, panelDragState.width, panelDragState.height);
+    applyPanelPosition();
+  }
+
+  function endPanelDrag(event) {
+    if (!panelEl || !panelDragState || event.pointerId !== panelDragState.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    panelEl.classList.remove("cch-dragging");
+    panelDragState = null;
+  }
+
+  function applyPanelPosition() {
+    if (!panelEl || !panelPosition) {
+      return;
+    }
+
+    const rect = panelEl.getBoundingClientRect();
+    panelPosition = clampPanelPosition(panelPosition.left, panelPosition.top, rect.width, rect.height);
+    panelEl.style.left = `${panelPosition.left}px`;
+    panelEl.style.top = `${panelPosition.top}px`;
+    panelEl.style.right = "auto";
+    panelEl.style.bottom = "auto";
+  }
+
+  function clampPanelPosition(left, top, width, height) {
+    const margin = 8;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+
+    return {
+      left: Math.min(Math.max(margin, left), maxLeft),
+      top: Math.min(Math.max(margin, top), maxTop)
+    };
+  }
+
+  function keepPanelInViewport() {
+    if (!panelEl || !panelPosition) {
+      return;
+    }
+
+    applyPanelPosition();
+  }
+
+  function isInteractiveElement(element) {
+    return Boolean(
+      element.closest(
+        'button, input, select, textarea, label, a, [role="button"], [contenteditable="true"]'
+      )
+    );
   }
 
   function createRemoteControls() {
@@ -438,7 +567,7 @@
     const header = document.createElement("div");
     header.className = "cch-section-header";
 
-    if (editingSectionId === section.id) {
+    if (isEditMode && editingSectionId === section.id) {
       renderEditingSectionHeader(header, section);
       sectionBlock.appendChild(header);
       return;
@@ -459,7 +588,7 @@
     titleWrap.append(name, subtotal);
 
     const actions = document.createElement("div");
-    actions.className = "cch-section-actions";
+    actions.className = "cch-section-actions cch-edit-only";
 
     const editButton = document.createElement("button");
     editButton.className = "cch-icon-button";
@@ -538,7 +667,7 @@
         row.className = "cch-criterion-row";
         row.dataset.criterionId = criterion.id;
 
-        if (editingCriterionId === criterion.id) {
+        if (isEditMode && editingCriterionId === criterion.id) {
           renderEditingCriterionRow(row, section, criterion);
         } else {
           renderReadOnlyCriterionRow(row, section, criterion);
@@ -552,15 +681,34 @@
   }
 
   function renderReadOnlyCriterionRow(row, section, criterion) {
+    row.classList.toggle("cch-criterion-checked", Boolean(criterion.checked));
+    row.setAttribute("role", "checkbox");
+    row.setAttribute("tabindex", "0");
+    row.setAttribute("aria-checked", String(Boolean(criterion.checked)));
+    row.setAttribute("aria-label", `${criterion.name}, ${formatNumber(criterion.points)} puntos`);
+    row.addEventListener("click", (event) => {
+      if (isEditMode || isInteractiveElement(event.target)) {
+        return;
+      }
+
+      setCriterionChecked(row, criterion, !criterion.checked);
+    });
+    row.addEventListener("keydown", (event) => {
+      if (isEditMode || (event.key !== "Enter" && event.key !== " ")) {
+        return;
+      }
+
+      event.preventDefault();
+      setCriterionChecked(row, criterion, !criterion.checked);
+    });
+
     const checkbox = document.createElement("input");
     checkbox.className = "cch-checkbox";
     checkbox.type = "checkbox";
     checkbox.checked = Boolean(criterion.checked);
     checkbox.setAttribute("aria-label", `Marcar ${criterion.name}`);
     checkbox.addEventListener("change", () => {
-      criterion.checked = checkbox.checked;
-      calculateTotal();
-      broadcastRemoteState();
+      setCriterionChecked(row, criterion, checkbox.checked);
     });
 
     const name = document.createElement("span");
@@ -572,7 +720,7 @@
     points.textContent = formatNumber(criterion.points);
 
     const editButton = document.createElement("button");
-    editButton.className = "cch-icon-button";
+    editButton.className = "cch-icon-button cch-edit-only";
     editButton.type = "button";
     editButton.textContent = "Editar";
     editButton.addEventListener("click", () => {
@@ -582,12 +730,26 @@
     });
 
     const deleteButton = document.createElement("button");
-    deleteButton.className = "cch-icon-button cch-danger";
+    deleteButton.className = "cch-icon-button cch-danger cch-edit-only";
     deleteButton.type = "button";
     deleteButton.textContent = "Eliminar";
     deleteButton.addEventListener("click", () => deleteCriterion(section.id, criterion.id));
 
     row.append(checkbox, name, points, editButton, deleteButton);
+  }
+
+  function setCriterionChecked(row, criterion, checked) {
+    criterion.checked = Boolean(checked);
+
+    const checkbox = row.querySelector(".cch-checkbox");
+    if (checkbox) {
+      checkbox.checked = criterion.checked;
+    }
+
+    row.classList.toggle("cch-criterion-checked", criterion.checked);
+    row.setAttribute("aria-checked", String(criterion.checked));
+    calculateTotal();
+    broadcastRemoteState();
   }
 
   function renderEditingCriterionRow(row, section, criterion) {
@@ -643,7 +805,7 @@
 
   function renderAddCriterionForm(sectionBlock, section) {
     const form = document.createElement("div");
-    form.className = "cch-add-criterion-form";
+    form.className = "cch-add-criterion-form cch-edit-only";
 
     const nameInput = document.createElement("input");
     nameInput.className = "cch-input";
@@ -1256,6 +1418,7 @@
       const value = formatNumber(sectionScores[index].total);
       const input = rubricInputs[index];
 
+      focusWithoutScrolling(input);
       setNativeValue(input, value);
       input.dispatchEvent(new Event("blur", { bubbles: true }));
     }
@@ -1303,6 +1466,18 @@
 
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function focusWithoutScrolling(element) {
+    if (!element || typeof element.focus !== "function") {
+      return;
+    }
+
+    try {
+      element.focus({ preventScroll: true });
+    } catch (_error) {
+      element.focus();
+    }
   }
 
   function getStorageKey() {
@@ -1456,30 +1631,50 @@
 
   function isRubricCriterionInput(input) {
     const directText = getDirectInputContextText(input);
-    const text = getInputContextText(input);
+    const text = getRubricCriterionCandidateText(input);
+    const cellText = getRubricCriterionCellText(input);
     const hasExplicitCriterionScore =
-      directText.includes("puntaje de criterio") || directText.includes("criterion score");
+      text.includes("puntaje de criterio") ||
+      text.includes("criterion score") ||
+      cellText.includes("puntaje de criterio") ||
+      cellText.includes("criterion score");
     const hasCriterionScoreText =
-      hasExplicitCriterionScore || directText.includes("criterio");
+      hasExplicitCriterionScore ||
+      directText.includes("criterio") ||
+      directText.includes("criterion");
+    const hasRubricPointsAttribute =
+      directText.includes("rubric") && (directText.includes("points") || directText.includes("puntos"));
     const hasPointsLimit =
       /\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text) ||
-      text.includes("agregar comentario");
+      text.includes("agregar comentario") ||
+      directText.includes("[points]");
+    const hasRubricContext =
+      hasRubricAncestor(input) || text.includes("rubric") || text.includes("rubrica");
 
-    if (hasExplicitCriterionScore && hasPointsLimit) {
+    if (hasOverallGradeContext(input) || !hasPointsLimit) {
+      return false;
+    }
+
+    if (hasExplicitCriterionScore) {
       return true;
     }
 
-    return hasCriterionScoreText && hasPointsLimit && hasRubricAncestor(input);
+    if (!hasRubricContext) {
+      return false;
+    }
+
+    return hasCriterionScoreText || hasRubricPointsAttribute;
   }
 
   function scoreRubricCriterionInput(input) {
     const directText = getDirectInputContextText(input);
-    const text = getInputContextText(input);
+    const text = getRubricCriterionCandidateText(input);
     let score = 0;
 
-    if (directText.includes("puntaje de criterio")) score += 80;
-    if (directText.includes("criterion score")) score += 80;
-    if (directText.includes("criterio")) score += 25;
+    if (text.includes("puntaje de criterio")) score += 80;
+    if (text.includes("criterion score")) score += 80;
+    if (directText.includes("criterio") || directText.includes("criterion")) score += 35;
+    if (directText.includes("rubric") && directText.includes("points")) score += 35;
     if (/\/\s*\d+([.,]\d+)?\s*(puntos|pts|points)?/.test(text)) score += 25;
     if (text.includes("agregar comentario")) score += 12;
     if (hasRubricAncestor(input)) score += 25;
@@ -1632,6 +1827,37 @@
     return normalizeText(parts.join(" "));
   }
 
+  function getRubricCriterionCandidateText(input) {
+    const parts = [getInputContextText(input)];
+    const cell = input.closest("td, th, [role='cell'], [role='gridcell']");
+    const row = input.closest("tr, [role='row']");
+    const rubricContainer = findRubricContainer(input);
+
+    if (cell) {
+      parts.push(cell.innerText);
+    }
+
+    if (row) {
+      parts.push(row.innerText);
+    }
+
+    if (rubricContainer) {
+      parts.push(
+        rubricContainer.id,
+        rubricContainer.className,
+        rubricContainer.getAttribute("role"),
+        rubricContainer.getAttribute("aria-label")
+      );
+    }
+
+    return normalizeText(parts.join(" ").slice(0, 4000));
+  }
+
+  function getRubricCriterionCellText(input) {
+    const cell = input.closest("td, th, [role='cell'], [role='gridcell']");
+    return normalizeText(cell ? cell.innerText : "");
+  }
+
   function hasOverallGradeContext(input) {
     const text = getDirectInputContextText(input);
 
@@ -1645,10 +1871,14 @@
   }
 
   function hasRubricAncestor(input) {
+    return Boolean(findRubricContainer(input));
+  }
+
+  function findRubricContainer(input) {
     let node = input.parentElement;
     let depth = 0;
 
-    while (node && depth < 8) {
+    while (node && depth < 14) {
       const text = normalizeText(
         [node.id, node.className, node.getAttribute("role"), node.getAttribute("aria-label")].join(
           " "
@@ -1656,14 +1886,14 @@
       );
 
       if (text.includes("rubric") || text.includes("rubrica") || text.includes("criterio")) {
-        return true;
+        return node;
       }
 
       node = node.parentElement;
       depth += 1;
     }
 
-    return false;
+    return null;
   }
 
   function hasGradeKeyword(text) {
@@ -1725,6 +1955,8 @@
     totalEl = null;
     statusEl = null;
     addSectionNameInput = null;
+    editModeCheckbox = null;
+    panelDragState = null;
     remoteToggleButton = null;
     remoteStatusEl = null;
     remoteUrlEl = null;
@@ -1763,6 +1995,7 @@
     }
 
     window.setInterval(handleUrlChange, URL_CHECK_INTERVAL_MS);
+    window.addEventListener("resize", keepPanelInViewport);
   }
 
   start();
