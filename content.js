@@ -85,7 +85,7 @@
   let editingCriterionId = null;
   let currentUrl = window.location.href;
   let currentStorageKey = null;
-  let isPanelClosed = false;
+  let isPanelClosed = loadPanelClosedPreference();
   let isEditMode = false;
   let panelPosition = null;
   let panelDragState = null;
@@ -208,6 +208,7 @@
       window.localStorage?.setItem(
         PANEL_PREFS_KEY,
         JSON.stringify({
+          panelClosed: isPanelClosed,
           panelSize,
           remoteControlsHidden
         })
@@ -233,12 +234,15 @@
     return Boolean(loadPanelPreferences().remoteControlsHidden);
   }
 
+  function loadPanelClosedPreference() {
+    return Boolean(loadPanelPreferences().panelClosed);
+  }
+
   function init() {
     if (!isSpeedGraderPage()) {
       stopRemoteMode();
       removePanel();
       removeLauncher();
-      isPanelClosed = false;
       return;
     }
 
@@ -871,6 +875,7 @@
 
   function openPanel() {
     isPanelClosed = false;
+    savePanelPreferences();
     removeLauncher();
 
     if (!document.getElementById(PANEL_ID)) {
@@ -883,6 +888,7 @@
 
   function closePanel() {
     isPanelClosed = true;
+    savePanelPreferences();
     removePanel();
     createLauncher();
   }

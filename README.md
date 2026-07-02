@@ -97,7 +97,8 @@ https://cursos.canvas.uc.cl/courses/.../gradebook/speed_grader?assignment_id=...
 3. Si el panel molesta, arrastra su encabezado para moverlo.
 4. Para agrandarlo o achicarlo, arrastra sus bordes superior/izquierdo o la
    esquina inferior derecha.
-5. Usa `Cerrar` para ocultarlo. Para volver a mostrarlo, usa
+5. Usa `Cerrar` para ocultarlo. El estado cerrado se mantiene incluso si
+   recargas SpeedGrader. Para volver a mostrarlo, usa
    `Abrir Corrector Canvas`.
 6. Activa `Editar` para crear o modificar la pauta.
 7. Agrega una seccion con su nombre.
@@ -114,6 +115,7 @@ https://cursos.canvas.uc.cl/courses/.../gradebook/speed_grader?assignment_id=...
     volver a mostrarlo con el boton `Remoto` del encabezado.
 
 La seleccion marcada no se guarda entre recargas. La pauta si se guarda.
+Tambien se guarda si el panel quedo abierto o cerrado.
 
 ## Ingreso de puntajes en Canvas
 
