@@ -17,11 +17,16 @@
       </header>
 
       <section class="actions-bar">
-        <button id="insertButton" type="button" disabled>Ingresar en Canvas</button>
+        <button id="editButton" type="button" aria-pressed="false" disabled>Editar pauta</button>
+        <button id="insertButton" type="button" disabled>Ingresar en rubrica</button>
         <button id="clearButton" type="button" disabled>Limpiar</button>
       </section>
 
       <section id="statusPanel" class="status-text"></section>
+      <form id="addSectionForm" class="edit-panel" hidden>
+        <input id="sectionNameInput" type="text" placeholder="Nueva seccion" aria-label="Nombre de la nueva seccion">
+        <button id="addSectionButton" type="submit" disabled>Agregar seccion</button>
+      </form>
       <section id="sectionsList" class="sections-list"></section>
     </main>
 

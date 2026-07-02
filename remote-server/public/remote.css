@@ -122,8 +122,29 @@ input {
 
 .actions-bar {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
+}
+
+#editButton[aria-pressed="true"] {
+  color: #17633a;
+  background: #edf8f1;
+  border-color: #b8dbc7;
+}
+
+.edit-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+}
+
+.edit-panel[hidden] {
+  display: none;
 }
 
 .status-text {
@@ -163,6 +184,10 @@ input {
   border-bottom: 1px solid #edf0f5;
 }
 
+.section-title-wrap {
+  min-width: 0;
+}
+
 .section-header[role="checkbox"] {
   cursor: pointer;
 }
@@ -193,6 +218,8 @@ input {
 }
 
 .section-subtotal {
+  display: block;
+  margin-top: 2px;
   color: #36506f;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -230,6 +257,58 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+.item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.small-button {
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.danger-button {
+  color: #a83232;
+  border-color: #efc8c8;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #fff1f1;
+}
+
+.save-button {
+  color: #17633a;
+  border-color: #b8dbc7;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #edf8f1;
+}
+
+.section-edit-form {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.criterion-row-with-actions {
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+}
+
+.criterion-row-editing {
+  grid-template-columns: minmax(0, 1fr) 96px auto auto;
+}
+
+.add-criterion-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fbfcfe;
+  border-top: 1px solid #edf0f5;
+}
+
 .empty-state {
   padding: 28px 12px;
   color: #6f7c8f;
@@ -251,5 +330,32 @@ input {
 
   .actions-bar {
     grid-template-columns: 1fr;
+  }
+
+  .edit-panel,
+  .section-edit-form,
+  .criterion-row-editing,
+  .add-criterion-form {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    grid-template-columns: 1fr;
+  }
+
+  .criterion-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+
+  .criterion-row.criterion-row-with-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .item-actions {
+    justify-content: stretch;
+  }
+
+  .item-actions .small-button {
+    flex: 1 1 auto;
   }
 }

@@ -304,10 +304,6 @@
     const headerActions = document.createElement("div");
     headerActions.className = "cch-header-actions";
 
-    const badge = document.createElement("span");
-    badge.className = "cch-badge";
-    badge.textContent = "MVP";
-
     const editModeLabel = document.createElement("label");
     editModeLabel.className = "cch-edit-mode-label";
 
@@ -330,7 +326,7 @@
     closeButton.setAttribute("aria-label", "Cerrar Corrector Canvas");
     closeButton.addEventListener("click", closePanel);
 
-    headerActions.append(badge, editModeLabel, closeButton);
+    headerActions.append(editModeLabel, closeButton);
     header.append(title, headerActions);
 
     const criteriaSection = document.createElement("section");

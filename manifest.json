@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Canvas Corrector Helper",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Panel flotante para calcular e ingresar puntajes en Canvas SpeedGrader.",
   "permissions": ["storage", "clipboardWrite"],
   "host_permissions": [
