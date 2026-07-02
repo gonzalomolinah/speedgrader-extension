@@ -4,7 +4,7 @@ Extension de Chrome Manifest V3 para apoyar la correccion en Canvas
 SpeedGrader. Agrega un panel flotante en `https://cursos.canvas.uc.cl/*`
 cuando la URL contiene `speed_grader`, permite organizar una pauta por
 secciones y criterios, calcula subtotales, calcula el total general y ayuda a
-ingresar esos puntajes en Canvas.
+ingresar esos subtotales en la rubrica de Canvas.
 
 El proyecto tambien incluye un servidor remoto liviano para usar el panel desde
 otro dispositivo en la misma red. Canvas sigue abierto solo en el computador
@@ -34,10 +34,10 @@ principal; el otro dispositivo actua como control remoto.
 - Permite marcar criterios logrados por cada estudiante.
 - Permite marcar o desmarcar una seccion completa desde su encabezado.
 - Calcula el subtotal de cada seccion y el total general.
-- Copia el total al portapapeles como respaldo.
 - Intenta escribir subtotales en los campos visibles de rubrica de Canvas.
-- Intenta escribir el total general en el input visible de calificacion.
-- No entrega la evaluacion automaticamente.
+- No modifica automaticamente la calificacion final de SpeedGrader.
+- Puede presionar automaticamente `Entregar evaluacion` si usas el boton combinado.
+- Solo entrega la evaluacion cuando usas el boton combinado.
 - Opcionalmente sincroniza el panel con otro dispositivo en la misma red.
 
 ## Requisitos
@@ -95,59 +95,51 @@ https://cursos.canvas.uc.cl/courses/.../gradebook/speed_grader?assignment_id=...
 
 2. El panel `Corrector Canvas` deberia aparecer en la esquina inferior derecha.
 3. Si el panel molesta, arrastra su encabezado para moverlo.
-4. Usa `Cerrar` para ocultarlo. Para volver a mostrarlo, usa
+4. Para agrandarlo o achicarlo, arrastra sus bordes superior/izquierdo o la
+   esquina inferior derecha.
+5. Usa `Cerrar` para ocultarlo. Para volver a mostrarlo, usa
    `Abrir Corrector Canvas`.
-5. Activa `Editar` para crear o modificar la pauta.
-6. Agrega una seccion con su nombre.
-7. Dentro de la seccion, agrega criterios con nombre y puntaje.
-8. Desactiva `Editar` para corregir mas rapido.
-9. Marca los criterios logrados por el estudiante. Puedes hacer clic en la fila
+6. Activa `Editar` para crear o modificar la pauta.
+7. Agrega una seccion con su nombre.
+8. Dentro de la seccion, agrega criterios con nombre y puntaje.
+9. Desactiva `Editar` para corregir mas rapido.
+10. Marca los criterios logrados por el estudiante. Puedes hacer clic en la fila
    completa, no solo en la casilla. Tambien puedes hacer clic en el encabezado
    de una seccion para marcarla o desmarcarla completa.
-10. Revisa el subtotal de cada seccion y el total.
-11. Usa `Limpiar` al cambiar de estudiante o cuando quieras desmarcar todo.
-12. Usa `Copiar total` si quieres pegar el puntaje manualmente.
-13. Usa `Ingresar en Canvas` para pedirle a la extension que escriba puntajes en
-    los campos visibles de Canvas.
+11. Revisa el subtotal de cada seccion y el total.
+12. Usa `Limpiar` al cambiar de estudiante o cuando quieras desmarcar todo.
+13. Usa `Ingresar en rubrica` para pedirle a la extension que escriba los
+    subtotales en los campos visibles de la rubrica de Canvas.
+14. Si no usas el modo remoto, presiona `Ocultar` dentro de ese bloque. Puedes
+    volver a mostrarlo con el boton `Remoto` del encabezado.
 
 La seleccion marcada no se guarda entre recargas. La pauta si se guarda.
 
 ## Ingreso de puntajes en Canvas
 
-El boton `Ingresar en Canvas` hace dos cosas:
+El boton `Ingresar en rubrica` hace una sola cosa:
 
 1. Busca campos visibles de puntaje de rubrica y escribe los subtotales de las
    secciones en orden visual.
-2. Busca el campo visible de calificacion general de SpeedGrader y escribe el
-   total.
 
 Ejemplo: si tienes secciones `Parte A`, `Parte B` y `Parte C`, la extension
 intentara escribir:
 
 - subtotal de `Parte A` en el primer campo visible de criterio de la rubrica;
 - subtotal de `Parte B` en el segundo campo visible;
-- subtotal de `Parte C` en el tercero;
-- total general en el campo principal de calificacion.
+- subtotal de `Parte C` en el tercero.
 
-Si Canvas no muestra una rubrica visible, la extension solo intentara escribir
-el total general. Si no encuentra el input correcto, mostrara un mensaje de
-error en el panel.
+Si Canvas no muestra una rubrica visible o no encuentra los inputs correctos,
+mostrara un mensaje de error en el panel.
 
 Importante: revisa siempre el puntaje en Canvas antes de entregar la evaluacion.
-La extension no presiona botones de entrega ni publica calificaciones.
 
 ## Persistencia de datos
 
-La pauta se guarda en `chrome.storage.local` con una clave por curso y tarea:
+La pauta se guarda en `chrome.storage.local` con una clave universal:
 
 ```text
-canvasCorrector:<courseId>:<assignmentId>
-```
-
-Si no se puede extraer el curso o la tarea desde la URL, se usa:
-
-```text
-canvasCorrector:default
+canvasCorrector:rubric
 ```
 
 Se guarda:
@@ -165,11 +157,14 @@ No se guarda:
 Si habia datos guardados con una version anterior sin secciones, la extension
 los migra automaticamente a una seccion llamada `General`.
 
+Si habia una pauta previa guardada por curso y tarea, la extension puede
+reutilizarla como base para la nueva pauta universal.
+
 ## Servidor remoto
 
 El modo remoto permite abrir el panel en otro dispositivo de la misma red, por
 ejemplo un tablet o un segundo computador. Ese dispositivo puede marcar
-criterios, limpiar la seleccion y pedir `Ingresar en Canvas`.
+criterios, editar la pauta, limpiar la seleccion y pedir `Ingresar en rubrica`.
 
 Canvas debe seguir abierto en el computador principal. El servidor remoto debe
 correr en ese mismo computador principal, porque la extension se conecta a:
@@ -215,11 +210,13 @@ http://192.168.1.23:8787
 
 7. Abre esa URL desde el navegador del dispositivo remoto.
 8. Marca criterios desde el dispositivo remoto.
-9. Verifica que el total se sincronice con el panel dentro de Canvas.
-10. Usa `Ingresar en Canvas` desde el remoto solo cuando estes listo para
-    escribir los puntajes en el navegador principal.
-11. Revisa manualmente Canvas antes de entregar.
-12. Cuando termines, presiona `Desactivar` en `Modo remoto` y cierra el servidor
+9. Si necesitas cambiar la pauta, usa `Editar pauta` en el panel web para
+   agregar, renombrar o eliminar secciones y criterios.
+10. Verifica que el total se sincronice con el panel dentro de Canvas.
+11. Usa `Ingresar en rubrica` desde el remoto solo cuando estes listo para
+    escribir los subtotales en el navegador principal.
+12. Revisa manualmente Canvas antes de entregar.
+13. Cuando termines, presiona `Desactivar` en `Modo remoto` y cierra el servidor
     con `Ctrl+C` en la terminal.
 
 No abras `http://localhost:8787` desde el dispositivo remoto. En ese dispositivo,
@@ -340,13 +337,11 @@ panel remoto.
 - Recarga SpeedGrader.
 - Si cambiaste `manifest.json`, la recarga de la extension es obligatoria.
 
-### `Ingresar en Canvas` no escribe el puntaje
+### `Ingresar en rubrica` no escribe los puntajes
 
-- Verifica que el campo de calificacion este visible en SpeedGrader.
 - Verifica que la rubrica, si existe, este visible y editable.
-- Prueba primero `Copiar total` y pega manualmente como respaldo.
 - Si Canvas cambio su HTML, puede que haya que ajustar la logica de
-  `findGradeInput()` o `findRubricCriterionInputs()` en `content.js`.
+  `findRubricCriterionInputs()` en `content.js`.
 
 ### El panel remoto dice `Esperando extension`
 
@@ -376,6 +371,7 @@ panel remoto.
 
 - Abrir una pagina normal de Canvas y confirmar que el panel no aparece.
 - Abrir SpeedGrader y confirmar que el panel aparece.
+- Agrandar y achicar el panel, y confirmar que se mantiene dentro de la ventana.
 - Crear secciones como `Parte A` y `Parte B`.
 - Agregar criterios con puntajes enteros y decimales.
 - Probar decimales con punto y con coma.
@@ -384,19 +380,21 @@ panel remoto.
 - Eliminar secciones y criterios.
 - Recargar SpeedGrader y confirmar que la pauta persiste.
 - Confirmar que la seleccion marcada no persiste despues de recargar.
+- Confirmar que la pauta aparece igual al abrir otra seccion o evaluacion.
 - Marcar criterios haciendo clic en la fila completa.
 - Marcar y desmarcar una seccion completa haciendo clic en su encabezado.
 - Confirmar que subtotales y total se actualizan correctamente.
 - Usar `Limpiar` y confirmar que todo vuelve a cero.
-- Usar `Copiar total` y pegar el valor en un campo temporal.
-- Usar `Ingresar en Canvas` y revisar que los puntajes queden correctos.
-- Confirmar que la evaluacion no se entrega automaticamente.
+- Usar `Ingresar en rubrica` y revisar que los subtotales queden correctos.
 - Ejecutar `node remote-server/server.js`.
 - Activar `Modo remoto` en el panel de Canvas.
 - Abrir la URL de red desde otro dispositivo.
 - Confirmar que el remoto recibe secciones, criterios y total.
 - Marcar criterios desde el remoto y confirmar sincronizacion en Canvas.
+- Usar `Editar pauta` desde el remoto para agregar, editar y eliminar secciones
+  y criterios.
 - Usar `Limpiar` desde el remoto.
-- Usar `Ingresar en Canvas` desde el remoto y revisar Canvas manualmente.
+- Usar `Ingresar en rubrica` desde el remoto y revisar Canvas manualmente.
 - Desactivar `Modo remoto` y confirmar que el panel remoto deja de controlar la
   seleccion.
+- Ocultar `Modo remoto` en el panel de Canvas y volver a mostrarlo con `Remoto`.

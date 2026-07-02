@@ -4,9 +4,21 @@
   const PANEL_ID = "canvas-corrector-helper-panel";
   const LAUNCHER_ID = "canvas-corrector-helper-launcher";
   const STORAGE_PREFIX = "canvasCorrector";
+  const UNIVERSAL_RUBRIC_STORAGE_KEY = `${STORAGE_PREFIX}:rubric`;
+  const PANEL_PREFS_KEY = `${STORAGE_PREFIX}:panelPreferences`;
   const URL_CHECK_INTERVAL_MS = 1000;
   const REMOTE_SERVER_URL = "ws://127.0.0.1:8787/extension";
   const REMOTE_RECONNECT_DELAY_MS = 1500;
+  const SUBMIT_EVALUATION_RETRY_DELAY_MS = 200;
+  const SUBMIT_EVALUATION_MAX_ATTEMPTS = 5;
+  const RUBRIC_INPUT_WRITE_DELAY_MS = 120;
+  const RUBRIC_COMMIT_CLICK_DELAY_MS = 100;
+  const RUBRIC_BEFORE_SUBMIT_DELAY_MS = 180;
+  const SHOW_SUBMIT_AND_EVALUATE_BUTTON = false;
+  const PANEL_MIN_WIDTH = 220;
+  const PANEL_MIN_HEIGHT = 360;
+  const PANEL_COMPACT_WIDTH = 300;
+  const PANEL_MARGIN = 8;
   const GRADE_KEYWORDS = ["calificacion", "grade", "score", "puntaje", "puntos"];
   const INPUT_TYPES = new Set(["", "text", "number", "tel", "search"]);
   const BLOCKED_INPUT_TYPES = new Set([
@@ -29,6 +41,44 @@
     "url",
     "week"
   ]);
+  const DEFAULT_SECTION_TEMPLATES = [
+    {
+      name: "3(a)",
+      criteria: [
+        { name: "Hallar f'(x)", points: 5 },
+        { name: "Identificar el punto critico x = 1", points: 5 },
+        { name: "Evaluar la funcion en los tres puntos candidatos", points: 10 },
+        { name: "Conclusion correcta", points: 5 }
+      ]
+    },
+    {
+      name: "3(b)",
+      criteria: [
+        { name: "Plantear las ecuaciones de area y volumen", points: 5 },
+        { name: "Obtener V(x)", points: 5 },
+        { name: "Hallar V'(x) y el punto critico x = 20", points: 10 },
+        { name: "Justificar que es un maximo absoluto", points: 10 },
+        { name: "Calculo del volumen maximo", points: 5 }
+      ]
+    }
+  ];
+  const LEGACY_DEFAULT_SECTION_TEMPLATES = [
+    {
+      name: "Parte A",
+      criteria: [
+        { name: "Area correcta", points: 15 },
+        { name: "Dominio correcto", points: 10 },
+        { name: "Integral bien planteada", points: 20 }
+      ]
+    },
+    {
+      name: "Parte B",
+      criteria: [
+        { name: "Resultado final", points: 10 },
+        { name: "Justificacion", points: 5 }
+      ]
+    }
+  ];
 
   let sections = [];
   let editingSectionId = null;
@@ -39,6 +89,8 @@
   let isEditMode = false;
   let panelPosition = null;
   let panelDragState = null;
+  let panelResizeState = null;
+  let panelSize = loadPanelSizePreference();
   let panelEl = null;
   let launcherEl = null;
   let listEl = null;
@@ -50,6 +102,9 @@
   let remoteSocket = null;
   let remoteReconnectTimer = null;
   let remoteServerInfo = null;
+  let remoteControlsHidden = loadRemoteControlsHiddenPreference();
+  let remoteSectionEl = null;
+  let remoteRevealButton = null;
   let remoteToggleButton = null;
   let remoteStatusEl = null;
   let remoteUrlEl = null;
@@ -64,26 +119,118 @@
       .slice(2, 10)}`;
   }
 
+  function buildSectionsFromTemplate(sectionTemplates) {
+    return sectionTemplates.map((section) => ({
+      id: makeId(),
+      name: section.name,
+      criteria: section.criteria.map((criterion) => ({
+        id: makeId(),
+        name: criterion.name,
+        points: criterion.points,
+        checked: false
+      }))
+    }));
+  }
+
   function defaultSections() {
-    return [
-      {
-        id: makeId(),
-        name: "Parte A",
-        criteria: [
-          { id: makeId(), name: "Area correcta", points: 15, checked: false },
-          { id: makeId(), name: "Dominio correcto", points: 10, checked: false },
-          { id: makeId(), name: "Integral bien planteada", points: 20, checked: false }
-        ]
-      },
-      {
-        id: makeId(),
-        name: "Parte B",
-        criteria: [
-          { id: makeId(), name: "Resultado final", points: 10, checked: false },
-          { id: makeId(), name: "Justificacion", points: 5, checked: false }
-        ]
+    return buildSectionsFromTemplate(DEFAULT_SECTION_TEMPLATES);
+  }
+
+  function buildRubricPayload(sourceSections) {
+    return {
+      version: 3,
+      sections: (sourceSections || []).map((section) => ({
+        id: section.id || makeId(),
+        name: section.name,
+        criteria: section.criteria.map((criterion) => ({
+          id: criterion.id || makeId(),
+          name: criterion.name,
+          points: criterion.points,
+          checked: false
+        }))
+      })),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function createRubricSignature(sourceSections) {
+    return JSON.stringify(
+      (sourceSections || []).map((section) => ({
+        name: String(section?.name || "").trim(),
+        criteria: (section?.criteria || []).map((criterion) => ({
+          name: String(criterion?.name || "").trim(),
+          points: parsePoints(criterion?.points)
+        }))
+      }))
+    );
+  }
+
+  function rubricMatchesTemplate(sourceSections, sectionTemplates) {
+    return (
+      createRubricSignature(sourceSections) ===
+      createRubricSignature(buildSectionsFromTemplate(sectionTemplates))
+    );
+  }
+
+  function looksLikeLegacyDefaultRubric(sourceSections) {
+    return rubricMatchesTemplate(sourceSections, LEGACY_DEFAULT_SECTION_TEMPLATES);
+  }
+
+  function persistRubricPayload(key, payload) {
+    return new Promise((resolve, reject) => {
+      if (!hasChromeStorage()) {
+        resolve();
+        return;
       }
-    ];
+
+      chrome.storage.local.set({ [key]: payload }, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  function loadPanelPreferences() {
+    try {
+      const raw = window.localStorage?.getItem(PANEL_PREFS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function savePanelPreferences() {
+    try {
+      window.localStorage?.setItem(
+        PANEL_PREFS_KEY,
+        JSON.stringify({
+          panelSize,
+          remoteControlsHidden
+        })
+      );
+    } catch (_error) {
+      // Preference persistence is best-effort; the panel still works without it.
+    }
+  }
+
+  function loadPanelSizePreference() {
+    const size = loadPanelPreferences().panelSize;
+    const width = Number(size?.width);
+    const height = Number(size?.height);
+
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      return null;
+    }
+
+    return constrainPanelSize({ width, height });
+  }
+
+  function loadRemoteControlsHiddenPreference() {
+    return Boolean(loadPanelPreferences().remoteControlsHidden);
   }
 
   function init() {
@@ -141,6 +288,8 @@
     panelEl.id = PANEL_ID;
     panelEl.setAttribute("aria-label", "Corrector Canvas");
     panelEl.dataset.editMode = String(isEditMode);
+    panelEl.dataset.resized = String(Boolean(panelSize));
+    panelEl.dataset.compactWidth = "false";
 
     const header = document.createElement("div");
     header.className = "cch-header";
@@ -221,7 +370,7 @@
     addSectionForm.append(addSectionNameInput, addSectionButton);
     addSectionBlock.append(addSectionTitle, addSectionForm);
 
-    const remoteSection = createRemoteControls();
+    const remoteSection = remoteControlsHidden ? null : createRemoteControls();
 
     const footer = document.createElement("footer");
     footer.className = "cch-footer";
@@ -244,14 +393,8 @@
     const insertButton = document.createElement("button");
     insertButton.className = "cch-button cch-button-primary";
     insertButton.type = "button";
-    insertButton.textContent = "Ingresar en Canvas";
+    insertButton.textContent = "Ingresar en rubrica";
     insertButton.addEventListener("click", insertGradeIntoCanvas);
-
-    const copyButton = document.createElement("button");
-    copyButton.className = "cch-button";
-    copyButton.type = "button";
-    copyButton.textContent = "Copiar total";
-    copyButton.addEventListener("click", copyTotal);
 
     const clearButton = document.createElement("button");
     clearButton.className = "cch-button";
@@ -259,7 +402,21 @@
     clearButton.textContent = "Limpiar";
     clearButton.addEventListener("click", clearSelection);
 
-    actions.append(insertButton, copyButton, clearButton);
+    actions.append(insertButton);
+
+    if (SHOW_SUBMIT_AND_EVALUATE_BUTTON) {
+      const submitButton = document.createElement("button");
+      submitButton.className = "cch-button";
+      submitButton.type = "button";
+      submitButton.textContent = "Ingresar y entregar evaluacion";
+      submitButton.title = "Ingresa los subtotales y luego presiona Entregar evaluacion en Canvas";
+      submitButton.classList.add("cch-button-long-label");
+      submitButton.addEventListener("click", insertAndSubmitEvaluation);
+      clearButton.classList.add("cch-button-full-row");
+      actions.append(submitButton);
+    }
+
+    actions.append(clearButton);
 
     statusEl = document.createElement("div");
     statusEl.className = "cch-status";
@@ -267,8 +424,16 @@
     statusEl.setAttribute("aria-live", "polite");
 
     footer.append(totalRow, actions, statusEl);
-    panelEl.append(header, criteriaSection, addSectionBlock, remoteSection, footer);
+    panelEl.append(header, criteriaSection, addSectionBlock);
+
+    if (remoteSection) {
+      panelEl.append(remoteSection);
+    }
+
+    panelEl.append(footer);
+    appendPanelResizeHandles(panelEl);
     updateRemoteUi();
+    updateRemoteRevealButton();
 
     panelEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") {
@@ -290,6 +455,7 @@
     });
 
     document.body.appendChild(panelEl);
+    applyPanelSize();
     applyPanelPosition();
   }
 
@@ -357,6 +523,176 @@
     panelDragState = null;
   }
 
+  function appendPanelResizeHandles(panel) {
+    [
+      ["top", "cch-resize-top"],
+      ["right", "cch-resize-right"],
+      ["left", "cch-resize-left"],
+      ["top-left", "cch-resize-top-left"],
+      ["bottom-right", "cch-resize-bottom-right"]
+    ].forEach(([handle, className]) => {
+      const handleEl = document.createElement("div");
+      handleEl.className = `cch-resize-handle ${className}`;
+      handleEl.dataset.resizeHandle = handle;
+      handleEl.setAttribute("aria-hidden", "true");
+      handleEl.addEventListener("pointerdown", startPanelResize);
+      handleEl.addEventListener("pointermove", movePanelResize);
+      handleEl.addEventListener("pointerup", endPanelResize);
+      handleEl.addEventListener("pointercancel", endPanelResize);
+      panel.appendChild(handleEl);
+    });
+  }
+
+  function startPanelResize(event) {
+    if (!panelEl || event.button !== 0) {
+      return;
+    }
+
+    const rect = panelEl.getBoundingClientRect();
+    const handle = event.currentTarget.dataset.resizeHandle || "bottom-right";
+
+    panelPosition = clampPanelPosition(rect.left, rect.top, rect.width, rect.height);
+    panelSize = constrainPanelSize({
+      width: rect.width,
+      height: rect.height
+    });
+    applyPanelGeometry();
+
+    panelResizeState = {
+      pointerId: event.pointerId,
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: panelPosition.left,
+      startTop: panelPosition.top,
+      startWidth: panelSize.width,
+      startHeight: panelSize.height,
+      startRight: panelPosition.left + panelSize.width,
+      startBottom: panelPosition.top + panelSize.height
+    };
+
+    panelEl.classList.add("cch-resizing");
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function movePanelResize(event) {
+    if (!panelEl || !panelResizeState || event.pointerId !== panelResizeState.pointerId) {
+      return;
+    }
+
+    const nextGeometry = calculatePanelResize(
+      panelResizeState,
+      event.clientX - panelResizeState.startX,
+      event.clientY - panelResizeState.startY
+    );
+
+    panelPosition = {
+      left: nextGeometry.left,
+      top: nextGeometry.top
+    };
+    panelSize = {
+      width: nextGeometry.width,
+      height: nextGeometry.height
+    };
+    applyPanelGeometry();
+  }
+
+  function endPanelResize(event) {
+    if (!panelEl || !panelResizeState || event.pointerId !== panelResizeState.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    panelEl.classList.remove("cch-resizing");
+    panelResizeState = null;
+    savePanelPreferences();
+  }
+
+  function calculatePanelResize(state, deltaX, deltaY) {
+    const viewportWidth = Math.max(window.innerWidth || 0, PANEL_MIN_WIDTH);
+    const viewportHeight = Math.max(window.innerHeight || 0, PANEL_MIN_HEIGHT);
+    const minWidth = Math.min(PANEL_MIN_WIDTH, Math.max(1, viewportWidth - PANEL_MARGIN * 2));
+    const minHeight = Math.min(PANEL_MIN_HEIGHT, Math.max(1, viewportHeight - PANEL_MARGIN * 2));
+    let left = state.startLeft;
+    let top = state.startTop;
+    let width = state.startWidth;
+    let height = state.startHeight;
+
+    if (state.handle.includes("left")) {
+      const right = Math.min(state.startRight, viewportWidth - PANEL_MARGIN);
+      left = clampNumber(state.startLeft + deltaX, PANEL_MARGIN, right - minWidth);
+      width = right - left;
+    } else if (state.handle.includes("right")) {
+      width = clampNumber(
+        state.startWidth + deltaX,
+        minWidth,
+        viewportWidth - state.startLeft - PANEL_MARGIN
+      );
+    }
+
+    if (state.handle.includes("top")) {
+      const bottom = Math.min(state.startBottom, viewportHeight - PANEL_MARGIN);
+      top = clampNumber(state.startTop + deltaY, PANEL_MARGIN, bottom - minHeight);
+      height = bottom - top;
+    } else if (state.handle.includes("bottom")) {
+      height = clampNumber(
+        state.startHeight + deltaY,
+        minHeight,
+        viewportHeight - state.startTop - PANEL_MARGIN
+      );
+    }
+
+    return { left, top, width, height };
+  }
+
+  function applyPanelGeometry() {
+    applyPanelSize();
+    applyPanelPosition();
+  }
+
+  function applyPanelSize() {
+    if (!panelEl) {
+      return;
+    }
+
+    if (!panelSize) {
+      panelEl.dataset.resized = "false";
+      panelEl.style.width = "";
+      panelEl.style.height = "";
+      updatePanelCompactWidth();
+      return;
+    }
+
+    panelSize = constrainPanelSize(panelSize);
+    panelEl.dataset.resized = "true";
+    panelEl.style.width = `${panelSize.width}px`;
+    panelEl.style.height = `${panelSize.height}px`;
+    updatePanelCompactWidth();
+  }
+
+  function constrainPanelSize(size) {
+    const viewportWidth = Math.max(window.innerWidth || 0, PANEL_MIN_WIDTH);
+    const viewportHeight = Math.max(window.innerHeight || 0, PANEL_MIN_HEIGHT);
+    const maxWidth = Math.max(1, viewportWidth - PANEL_MARGIN * 2);
+    const maxHeight = Math.max(1, viewportHeight - PANEL_MARGIN * 2);
+    const minWidth = Math.min(PANEL_MIN_WIDTH, maxWidth);
+    const minHeight = Math.min(PANEL_MIN_HEIGHT, maxHeight);
+
+    return {
+      width: clampNumber(Number(size?.width) || PANEL_MIN_WIDTH, minWidth, maxWidth),
+      height: clampNumber(Number(size?.height) || PANEL_MIN_HEIGHT, minHeight, maxHeight)
+    };
+  }
+
+  function clampNumber(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
   function applyPanelPosition() {
     if (!panelEl || !panelPosition) {
       return;
@@ -368,6 +704,15 @@
     panelEl.style.top = `${panelPosition.top}px`;
     panelEl.style.right = "auto";
     panelEl.style.bottom = "auto";
+  }
+
+  function updatePanelCompactWidth() {
+    if (!panelEl) {
+      return;
+    }
+
+    const width = panelSize?.width || panelEl.getBoundingClientRect().width || PANEL_MIN_WIDTH;
+    panelEl.dataset.compactWidth = String(width <= PANEL_COMPACT_WIDTH);
   }
 
   function clampPanelPosition(left, top, width, height) {
@@ -382,11 +727,11 @@
   }
 
   function keepPanelInViewport() {
-    if (!panelEl || !panelPosition) {
+    if (!panelEl) {
       return;
     }
 
-    applyPanelPosition();
+    applyPanelGeometry();
   }
 
   function isInteractiveElement(element) {
@@ -400,10 +745,23 @@
   function createRemoteControls() {
     const remoteSection = document.createElement("section");
     remoteSection.className = "cch-section cch-remote-section";
+    remoteSectionEl = remoteSection;
+
+    const remoteTitleRow = document.createElement("div");
+    remoteTitleRow.className = "cch-section-title-row";
 
     const remoteTitle = document.createElement("div");
     remoteTitle.className = "cch-section-title";
     remoteTitle.textContent = "Modo remoto";
+
+    const hideRemoteButton = document.createElement("button");
+    hideRemoteButton.className = "cch-icon-button";
+    hideRemoteButton.type = "button";
+    hideRemoteButton.textContent = "Ocultar";
+    hideRemoteButton.setAttribute("aria-label", "Ocultar modo remoto");
+    hideRemoteButton.addEventListener("click", hideRemoteControls);
+
+    remoteTitleRow.append(remoteTitle, hideRemoteButton);
 
     const remoteRow = document.createElement("div");
     remoteRow.className = "cch-remote-row";
@@ -428,9 +786,70 @@
     remoteStatusEl.setAttribute("role", "status");
     remoteStatusEl.setAttribute("aria-live", "polite");
 
-    remoteSection.append(remoteTitle, remoteRow, remoteUrlEl, remoteStatusEl);
+    remoteSection.append(remoteTitleRow, remoteRow, remoteUrlEl, remoteStatusEl);
 
     return remoteSection;
+  }
+
+  function hideRemoteControls() {
+    remoteControlsHidden = true;
+    remoteSectionEl?.remove();
+    remoteSectionEl = null;
+    remoteToggleButton = null;
+    remoteStatusEl = null;
+    remoteUrlEl = null;
+    savePanelPreferences();
+    updateRemoteRevealButton();
+    updateRemoteUi();
+    setStatus(
+      remoteEnabled ? "Opcion de modo remoto oculta. Sigue activa." : "Opcion de modo remoto oculta.",
+      "neutral"
+    );
+  }
+
+  function showRemoteControls() {
+    remoteControlsHidden = false;
+    savePanelPreferences();
+
+    if (panelEl && !remoteSectionEl) {
+      const footer = panelEl.querySelector(".cch-footer");
+      const remoteSection = createRemoteControls();
+      panelEl.insertBefore(remoteSection, footer);
+      updateRemoteUi();
+    }
+
+    updateRemoteRevealButton();
+    setStatus("Opcion de modo remoto visible.", "neutral");
+  }
+
+  function updateRemoteRevealButton() {
+    if (!panelEl) {
+      return;
+    }
+
+    const headerActions = panelEl.querySelector(".cch-header-actions");
+
+    if (!headerActions) {
+      return;
+    }
+
+    if (!remoteControlsHidden) {
+      remoteRevealButton?.remove();
+      remoteRevealButton = null;
+      return;
+    }
+
+    if (remoteRevealButton) {
+      return;
+    }
+
+    remoteRevealButton = document.createElement("button");
+    remoteRevealButton.className = "cch-icon-button";
+    remoteRevealButton.type = "button";
+    remoteRevealButton.textContent = "Remoto";
+    remoteRevealButton.setAttribute("aria-label", "Mostrar modo remoto");
+    remoteRevealButton.addEventListener("click", showRemoteControls);
+    headerActions.insertBefore(remoteRevealButton, headerActions.lastElementChild);
   }
 
   function createLauncher() {
@@ -473,7 +892,9 @@
   }
 
   function loadRubric() {
-    const key = getStorageKey();
+    const key = currentStorageKey || getStorageKey();
+    const legacyKey = getLegacyStorageKey();
+    const keysToLoad = legacyKey === key ? [key] : [key, legacyKey];
 
     return new Promise((resolve) => {
       if (!hasChromeStorage()) {
@@ -481,7 +902,7 @@
         return;
       }
 
-      chrome.storage.local.get([key], (result) => {
+      chrome.storage.local.get(keysToLoad, (result) => {
         if (chrome.runtime.lastError) {
           resolve(defaultSections());
           return;
@@ -490,7 +911,21 @@
         const stored = result[key];
 
         if (stored === undefined) {
-          resolve(defaultSections());
+          const legacyStored = legacyKey === key ? undefined : result[legacyKey];
+
+          if (legacyStored !== undefined) {
+            const normalizedLegacy = normalizeStoredRubric(legacyStored);
+
+            if (normalizedLegacy.length > 0 && !looksLikeLegacyDefaultRubric(normalizedLegacy)) {
+              persistRubricPayload(key, buildRubricPayload(normalizedLegacy)).catch(() => {});
+              resolve(normalizedLegacy);
+              return;
+            }
+          }
+
+          const defaults = defaultSections();
+          persistRubricPayload(key, buildRubricPayload(defaults)).catch(() => {});
+          resolve(defaults);
           return;
         }
 
@@ -501,36 +936,7 @@
 
   function saveRubric() {
     const key = currentStorageKey || getStorageKey();
-    const payload = {
-      version: 2,
-      sections: sections.map((section) => ({
-        id: section.id || makeId(),
-        name: section.name,
-        criteria: section.criteria.map((criterion) => ({
-          id: criterion.id || makeId(),
-          name: criterion.name,
-          points: criterion.points,
-          checked: false
-        }))
-      })),
-      updatedAt: new Date().toISOString()
-    };
-
-    return new Promise((resolve, reject) => {
-      if (!hasChromeStorage()) {
-        resolve();
-        return;
-      }
-
-      chrome.storage.local.set({ [key]: payload }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-          return;
-        }
-
-        resolve();
-      });
-    });
+    return persistRubricPayload(key, buildRubricPayload(sections));
   }
 
   function renderCriteria() {
@@ -1099,6 +1505,41 @@
       return;
     }
 
+    if (message.type === "remote:addSection") {
+      applyRemoteAddSection(message.name);
+      return;
+    }
+
+    if (message.type === "remote:updateSection") {
+      applyRemoteUpdateSection(message.sectionId, message.name);
+      return;
+    }
+
+    if (message.type === "remote:deleteSection") {
+      applyRemoteDeleteSection(message.sectionId);
+      return;
+    }
+
+    if (message.type === "remote:addCriterion") {
+      applyRemoteAddCriterion(message.sectionId, message.name, message.points);
+      return;
+    }
+
+    if (message.type === "remote:updateCriterion") {
+      applyRemoteUpdateCriterion(
+        message.sectionId,
+        message.criterionId,
+        message.name,
+        message.points
+      );
+      return;
+    }
+
+    if (message.type === "remote:deleteCriterion") {
+      applyRemoteDeleteCriterion(message.sectionId, message.criterionId);
+      return;
+    }
+
     if (message.type === "remote:clearSelection") {
       clearSelection({ source: "remote" });
       return;
@@ -1135,6 +1576,182 @@
     }
 
     setSectionCriteriaChecked(section, checked, { source: "remote" });
+  }
+
+  function applyRemoteAddSection(nameValue) {
+    const name = String(nameValue || "").trim();
+
+    if (!name) {
+      setStatus("El panel web envio una seccion sin nombre.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    sections.push({
+      id: makeId(),
+      name,
+      criteria: []
+    });
+
+    editingSectionId = null;
+    editingCriterionId = null;
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Seccion agregada desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar la seccion del panel web.", "error"));
+  }
+
+  function applyRemoteUpdateSection(sectionId, nameValue) {
+    const section = sections.find((item) => item.id === sectionId);
+    const name = String(nameValue || "").trim();
+
+    if (!section) {
+      setStatus("El panel web intento editar una seccion que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    if (!name) {
+      setStatus("El nombre de la seccion no puede estar vacio.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    section.name = name;
+    editingSectionId = null;
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Seccion actualizada desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar el cambio del panel web.", "error"));
+  }
+
+  function applyRemoteDeleteSection(sectionId) {
+    const section = sections.find((item) => item.id === sectionId);
+
+    if (!section) {
+      setStatus("El panel web intento eliminar una seccion que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    sections = sections.filter((item) => item.id !== sectionId);
+
+    if (editingSectionId === sectionId) {
+      editingSectionId = null;
+    }
+
+    if (section.criteria.some((criterion) => criterion.id === editingCriterionId)) {
+      editingCriterionId = null;
+    }
+
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Seccion eliminada desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar la eliminacion del panel web.", "error"));
+  }
+
+  function applyRemoteAddCriterion(sectionId, nameValue, pointsValue) {
+    const section = sections.find((item) => item.id === sectionId);
+    const name = String(nameValue || "").trim();
+    const points = parsePoints(pointsValue);
+
+    if (!section) {
+      setStatus("El panel web intento agregar a una seccion que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    if (!name) {
+      setStatus("El panel web envio un criterio sin nombre.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    if (points === null) {
+      setStatus("El puntaje enviado desde el panel web no es valido.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    section.criteria.push({
+      id: makeId(),
+      name,
+      points,
+      checked: false
+    });
+
+    editingSectionId = null;
+    editingCriterionId = null;
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Criterio agregado desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar el criterio del panel web.", "error"));
+  }
+
+  function applyRemoteUpdateCriterion(sectionId, criterionId, nameValue, pointsValue) {
+    const section = sections.find((item) => item.id === sectionId);
+    const criterion = section?.criteria.find((item) => item.id === criterionId);
+    const name = String(nameValue || "").trim();
+    const points = parsePoints(pointsValue);
+
+    if (!section || !criterion) {
+      setStatus("El panel web intento editar un criterio que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    if (!name) {
+      setStatus("El nombre del criterio no puede estar vacio.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    if (points === null) {
+      setStatus("El puntaje del criterio no es valido.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    criterion.name = name;
+    criterion.points = points;
+    editingCriterionId = null;
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Criterio actualizado desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar el cambio del panel web.", "error"));
+  }
+
+  function applyRemoteDeleteCriterion(sectionId, criterionId) {
+    const section = sections.find((item) => item.id === sectionId);
+
+    if (!section) {
+      setStatus("El panel web intento eliminar un criterio que ya no existe.", "error");
+      broadcastRemoteState();
+      return;
+    }
+
+    section.criteria = section.criteria.filter((criterion) => criterion.id !== criterionId);
+
+    if (editingCriterionId === criterionId) {
+      editingCriterionId = null;
+    }
+
+    renderCriteria();
+    broadcastRemoteState();
+
+    saveRubric()
+      .then(() => setStatus("Criterio eliminado desde el panel web.", "success"))
+      .catch(() => setStatus("No se pudo guardar la eliminacion del panel web.", "error"));
   }
 
   function broadcastRemoteState() {
@@ -1207,6 +1824,15 @@
       } else {
         remoteUrlEl.textContent = "Servidor local: ws://127.0.0.1:8787";
       }
+    }
+
+    if (remoteRevealButton) {
+      remoteRevealButton.textContent = remoteEnabled ? "Remoto activo" : "Remoto";
+      remoteRevealButton.classList.toggle("cch-button-primary", remoteEnabled);
+      remoteRevealButton.setAttribute(
+        "aria-label",
+        remoteEnabled ? "Mostrar modo remoto activo" : "Mostrar modo remoto"
+      );
     }
   }
 
@@ -1416,14 +2042,6 @@
     );
   }
 
-  function copyTotal() {
-    const totalText = formatNumber(calculateTotal());
-
-    copyText(totalText)
-      .then(() => setStatus(`Total copiado: ${totalText}`, "success"))
-      .catch(() => setStatus("No se pudo copiar el total.", "error"));
-  }
-
   function findGradeInput() {
     const scoredCandidates = Array.from(document.querySelectorAll("input"))
       .filter(isUsableGradeInput)
@@ -1460,48 +2078,51 @@
     return contextualMatch ? contextualMatch.input : null;
   }
 
-  function insertGradeIntoCanvas() {
-    const input = findGradeInput();
-    const totalText = formatNumber(calculateTotal());
-    const sectionResult = insertSectionScoresIntoCanvas();
+  async function insertGradeIntoCanvas() {
+    const sectionResult = await insertSectionScoresIntoCanvas();
 
-    if (!input) {
-      if (sectionResult.written > 0) {
-        setStatus(
-          `Subtotales ingresados (${sectionResult.written}/${sectionResult.expected}). No se encontro el total.`,
-          "error"
-        );
-        return;
-      }
-
-      setStatus("No se encontro el input de puntaje visible en SpeedGrader.", "error");
-      return;
+    if (sectionResult.expected === 0) {
+      setStatus("No hay secciones con criterios para ingresar en la rubrica.", "error");
+      return false;
     }
 
-    input.focus();
-    setNativeValue(input, totalText);
-    input.dispatchEvent(new Event("blur", { bubbles: true }));
-
     if (sectionResult.found === 0) {
-      setStatus(`Puntaje ${totalText} ingresado. Revisa antes de entregar.`, "success");
-      return;
+      setStatus("No se encontraron campos visibles de puntaje de rubrica en SpeedGrader.", "error");
+      return false;
+    }
+
+    if (sectionResult.written > 0) {
+      await triggerNeutralRubricCommitClick();
     }
 
     if (sectionResult.written < sectionResult.expected) {
       setStatus(
-        `Total ${totalText} ingresado; subtotales ${sectionResult.written}/${sectionResult.expected}.`,
+        `Subtotales ingresados ${sectionResult.written}/${sectionResult.expected}. Revisa la rubrica antes de entregar.`,
         "error"
       );
-      return;
+      return false;
     }
 
     setStatus(
-      `Total ${totalText} y ${sectionResult.written} subtotales ingresados. Revisa antes de entregar.`,
+      `Subtotales ingresados en la rubrica (${sectionResult.written}/${sectionResult.expected}).`,
       "success"
     );
+
+    return true;
   }
 
-  function insertSectionScoresIntoCanvas() {
+  async function insertAndSubmitEvaluation() {
+    if (!(await insertGradeIntoCanvas())) {
+      return false;
+    }
+
+    setStatus("Subtotales ingresados. Intentando entregar la evaluacion...", "neutral");
+    await wait(RUBRIC_BEFORE_SUBMIT_DELAY_MS);
+    scheduleEvaluationSubmitAttempt(0);
+    return true;
+  }
+
+  async function insertSectionScoresIntoCanvas() {
     const sectionScores = sections
       .filter((section) => section.criteria.length > 0)
       .map((section) => ({
@@ -1519,6 +2140,7 @@
       focusWithoutScrolling(input);
       setNativeValue(input, value);
       input.dispatchEvent(new Event("blur", { bubbles: true }));
+      await wait(RUBRIC_INPUT_WRITE_DELAY_MS);
     }
 
     return {
@@ -1526,6 +2148,29 @@
       found: rubricInputs.length,
       written: count
     };
+  }
+
+  async function triggerNeutralRubricCommitClick() {
+    const neutralButton = document.createElement("button");
+    neutralButton.type = "button";
+    neutralButton.tabIndex = -1;
+    neutralButton.setAttribute("aria-hidden", "true");
+    neutralButton.style.position = "fixed";
+    neutralButton.style.top = "0";
+    neutralButton.style.left = "0";
+    neutralButton.style.width = "1px";
+    neutralButton.style.height = "1px";
+    neutralButton.style.padding = "0";
+    neutralButton.style.margin = "0";
+    neutralButton.style.opacity = "0";
+    neutralButton.style.border = "0";
+    neutralButton.style.pointerEvents = "none";
+
+    document.body.appendChild(neutralButton);
+    focusWithoutScrolling(neutralButton);
+    neutralButton.click();
+    await wait(RUBRIC_COMMIT_CLICK_DELAY_MS);
+    neutralButton.remove();
   }
 
   function findRubricCriterionInputs() {
@@ -1547,6 +2192,120 @@
         return a.rect.left - b.rect.left;
       })
       .map((candidate) => candidate.input);
+  }
+
+  function scheduleEvaluationSubmitAttempt(attempt) {
+    window.setTimeout(() => {
+      const submitButton = findSubmitEvaluationButton();
+
+      if (submitButton) {
+        focusWithoutScrolling(submitButton);
+        submitButton.click();
+        setStatus("Subtotales ingresados y boton Entregar evaluacion presionado.", "success");
+        return;
+      }
+
+      if (attempt + 1 >= SUBMIT_EVALUATION_MAX_ATTEMPTS) {
+        setStatus(
+          "Subtotales ingresados, pero no se encontro un boton disponible para Entregar evaluacion.",
+          "error"
+        );
+        return;
+      }
+
+      scheduleEvaluationSubmitAttempt(attempt + 1);
+    }, SUBMIT_EVALUATION_RETRY_DELAY_MS);
+  }
+
+  function findSubmitEvaluationButton() {
+    return Array.from(
+      document.querySelectorAll("button, input[type='button'], input[type='submit'], [role='button']")
+    )
+      .filter(isUsableSubmitEvaluationButton)
+      .map((element) => ({
+        element,
+        rect: element.getBoundingClientRect(),
+        score: scoreSubmitEvaluationButton(element)
+      }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+
+        const topDiff = b.rect.top - a.rect.top;
+
+        if (Math.abs(topDiff) > 8) {
+          return topDiff;
+        }
+
+        return b.rect.left - a.rect.left;
+      })
+      .map((candidate) => candidate.element)[0] || null;
+  }
+
+  function isUsableSubmitEvaluationButton(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (!isVisible(element)) {
+      return false;
+    }
+
+    if (element.closest(`#${PANEL_ID}`) || element.id === LAUNCHER_ID) {
+      return false;
+    }
+
+    if (element.matches("[disabled]") || element.getAttribute("aria-disabled") === "true") {
+      return false;
+    }
+
+    return Boolean(getActionElementText(element));
+  }
+
+  function scoreSubmitEvaluationButton(element) {
+    const text = getActionElementText(element);
+    const rect = element.getBoundingClientRect();
+    let score = 0;
+
+    if (text.includes("entregar evaluacion")) score += 180;
+    if (text.includes("entregar") && text.includes("evaluacion")) score += 120;
+    if (text.includes("submit assessment")) score += 180;
+    if (text.includes("submit evaluation")) score += 180;
+    if (text.includes("submit") && (text.includes("assessment") || text.includes("evaluation"))) {
+      score += 120;
+    }
+    if (text.includes("cancelar") || text.includes("cancel")) score -= 180;
+    if (text.includes("completa") || text.includes("complete")) score -= 80;
+    if (text.includes("rubrica") || text.includes("rubric")) score -= 40;
+    if (rect.top > window.innerHeight * 0.45) score += 18;
+    if (rect.left > window.innerWidth * 0.5) score += 14;
+
+    return score;
+  }
+
+  function getActionElementText(element) {
+    const value =
+      element instanceof HTMLInputElement || element instanceof HTMLButtonElement ? element.value : "";
+
+    return normalizeText(
+      [
+        element.innerText,
+        element.textContent,
+        value,
+        element.getAttribute("aria-label"),
+        element.getAttribute("title"),
+        element.id,
+        element.className
+      ].join(" ")
+    );
+  }
+
+  function wait(delayMs) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, delayMs);
+    });
   }
 
   function setNativeValue(element, value) {
@@ -1579,6 +2338,10 @@
   }
 
   function getStorageKey() {
+    return UNIVERSAL_RUBRIC_STORAGE_KEY;
+  }
+
+  function getLegacyStorageKey() {
     const url = new URL(window.location.href);
     const courseMatch = url.pathname.match(/\/courses\/([^/]+)/);
     const assignmentId = url.searchParams.get("assignment_id");
@@ -2055,6 +2818,9 @@
     addSectionNameInput = null;
     editModeCheckbox = null;
     panelDragState = null;
+    panelResizeState = null;
+    remoteSectionEl = null;
+    remoteRevealButton = null;
     remoteToggleButton = null;
     remoteStatusEl = null;
     remoteUrlEl = null;
