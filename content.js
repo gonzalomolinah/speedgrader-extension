@@ -15,10 +15,15 @@
   const RUBRIC_COMMIT_CLICK_DELAY_MS = 100;
   const RUBRIC_BEFORE_SUBMIT_DELAY_MS = 180;
   const SHOW_SUBMIT_AND_EVALUATE_BUTTON = false;
-  const PANEL_MIN_WIDTH = 220;
-  const PANEL_MIN_HEIGHT = 360;
+  const PANEL_DEFAULT_MIN_WIDTH = 220;
+  const PANEL_ABSOLUTE_MIN_WIDTH = 170;
+  const PANEL_DEFAULT_MIN_HEIGHT = 360;
+  const PANEL_ABSOLUTE_MIN_HEIGHT = 300;
   const PANEL_COMPACT_WIDTH = 300;
   const PANEL_MARGIN = 8;
+  const PANEL_DEFAULT_FONT_SIZE = 13;
+  const PANEL_MIN_FONT_SIZE = 10;
+  const PANEL_MAX_FONT_SIZE = 16;
   const GRADE_KEYWORDS = ["calificacion", "grade", "score", "puntaje", "puntos"];
   const INPUT_TYPES = new Set(["", "text", "number", "tel", "search"]);
   const BLOCKED_INPUT_TYPES = new Set([
@@ -90,6 +95,7 @@
   let panelPosition = null;
   let panelDragState = null;
   let panelResizeState = null;
+  let panelFontSize = loadPanelFontSizePreference();
   let panelSize = loadPanelSizePreference();
   let panelEl = null;
   let launcherEl = null;
@@ -98,6 +104,8 @@
   let statusEl = null;
   let addSectionNameInput = null;
   let editModeCheckbox = null;
+  let panelFontSizeInput = null;
+  let panelFontSizeValueEl = null;
   let remoteEnabled = false;
   let remoteSocket = null;
   let remoteReconnectTimer = null;
@@ -210,6 +218,7 @@
         JSON.stringify({
           panelClosed: isPanelClosed,
           panelSize,
+          panelFontSize,
           remoteControlsHidden
         })
       );
@@ -228,6 +237,10 @@
     }
 
     return constrainPanelSize({ width, height });
+  }
+
+  function loadPanelFontSizePreference() {
+    return normalizePanelFontSize(loadPanelPreferences().panelFontSize);
   }
 
   function loadRemoteControlsHiddenPreference() {
@@ -370,6 +383,7 @@
     addSectionForm.append(addSectionNameInput, addSectionButton);
     addSectionBlock.append(addSectionTitle, addSectionForm);
 
+    const settingsBlock = createPanelSettings();
     const remoteSection = remoteControlsHidden ? null : createRemoteControls();
 
     const footer = document.createElement("footer");
@@ -424,7 +438,7 @@
     statusEl.setAttribute("aria-live", "polite");
 
     footer.append(totalRow, actions, statusEl);
-    panelEl.append(header, criteriaSection, addSectionBlock);
+    panelEl.append(header, criteriaSection, settingsBlock, addSectionBlock);
 
     if (remoteSection) {
       panelEl.append(remoteSection);
@@ -455,8 +469,44 @@
     });
 
     document.body.appendChild(panelEl);
+    applyPanelTypography();
     applyPanelSize();
     applyPanelPosition();
+  }
+
+  function createPanelSettings() {
+    const settingsBlock = document.createElement("section");
+    settingsBlock.className = "cch-section cch-edit-only cch-settings-section";
+
+    const settingsTitle = document.createElement("div");
+    settingsTitle.className = "cch-section-title";
+    settingsTitle.textContent = "Ajustes del menu";
+
+    const fontSizeLabel = document.createElement("label");
+    fontSizeLabel.className = "cch-font-size-control";
+
+    const fontSizeText = document.createElement("span");
+    fontSizeText.textContent = "Letra del menu";
+
+    panelFontSizeInput = document.createElement("input");
+    panelFontSizeInput.type = "range";
+    panelFontSizeInput.min = String(PANEL_MIN_FONT_SIZE);
+    panelFontSizeInput.max = String(PANEL_MAX_FONT_SIZE);
+    panelFontSizeInput.step = "1";
+    panelFontSizeInput.value = String(panelFontSize);
+    panelFontSizeInput.setAttribute("aria-label", "Tamano de letra del menu");
+    panelFontSizeInput.addEventListener("input", () => {
+      setPanelFontSize(panelFontSizeInput.value);
+    });
+
+    panelFontSizeValueEl = document.createElement("output");
+    panelFontSizeValueEl.className = "cch-font-size-value";
+    panelFontSizeValueEl.textContent = `${panelFontSize}px`;
+
+    fontSizeLabel.append(fontSizeText, panelFontSizeInput, panelFontSizeValueEl);
+    settingsBlock.append(settingsTitle, fontSizeLabel);
+
+    return settingsBlock;
   }
 
   function setEditMode(enabled) {
@@ -474,6 +524,81 @@
 
     renderCriteria();
     setStatus(isEditMode ? "Modo edicion activado." : "Modo correccion activado.", "neutral");
+  }
+
+  function setPanelFontSize(value) {
+    panelFontSize = normalizePanelFontSize(value);
+    updatePanelFontSizeControl();
+    applyPanelTypography();
+
+    if (panelSize) {
+      panelSize = constrainPanelSize(panelSize);
+    }
+
+    applyPanelGeometry();
+    savePanelPreferences();
+  }
+
+  function normalizePanelFontSize(value) {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+      return PANEL_DEFAULT_FONT_SIZE;
+    }
+
+    return clampNumber(Math.round(numericValue), PANEL_MIN_FONT_SIZE, PANEL_MAX_FONT_SIZE);
+  }
+
+  function updatePanelFontSizeControl() {
+    if (panelFontSizeInput) {
+      panelFontSizeInput.value = String(panelFontSize);
+    }
+
+    if (panelFontSizeValueEl) {
+      panelFontSizeValueEl.textContent = `${panelFontSize}px`;
+    }
+  }
+
+  function applyPanelTypography() {
+    if (!panelEl) {
+      return;
+    }
+
+    panelFontSize = normalizePanelFontSize(panelFontSize);
+    panelEl.style.setProperty("--cch-font-size", `${panelFontSize}px`);
+    panelEl.style.setProperty("--cch-panel-min-width", `${getPanelMinWidth()}px`);
+    panelEl.style.setProperty("--cch-panel-min-height", `${getPanelMinHeight()}px`);
+    panelEl.dataset.fontSize = String(panelFontSize);
+    updatePanelFontSizeControl();
+  }
+
+  function getPanelFontScale() {
+    return panelFontSize / PANEL_DEFAULT_FONT_SIZE;
+  }
+
+  function getPanelMinWidth() {
+    const maxScaledWidth = PANEL_DEFAULT_MIN_WIDTH * (PANEL_MAX_FONT_SIZE / PANEL_DEFAULT_FONT_SIZE);
+
+    return Math.round(
+      clampNumber(
+        PANEL_DEFAULT_MIN_WIDTH * getPanelFontScale(),
+        PANEL_ABSOLUTE_MIN_WIDTH,
+        maxScaledWidth
+      )
+    );
+  }
+
+  function getPanelMinHeight() {
+    const maxScaledHeight =
+      PANEL_DEFAULT_MIN_HEIGHT * (PANEL_MAX_FONT_SIZE / PANEL_DEFAULT_FONT_SIZE);
+
+    return Math.round(
+      clampNumber(
+        PANEL_DEFAULT_MIN_HEIGHT * getPanelFontScale(),
+        PANEL_ABSOLUTE_MIN_HEIGHT,
+        maxScaledHeight
+      )
+    );
   }
 
   function startPanelDrag(event) {
@@ -614,10 +739,12 @@
   }
 
   function calculatePanelResize(state, deltaX, deltaY) {
-    const viewportWidth = Math.max(window.innerWidth || 0, PANEL_MIN_WIDTH);
-    const viewportHeight = Math.max(window.innerHeight || 0, PANEL_MIN_HEIGHT);
-    const minWidth = Math.min(PANEL_MIN_WIDTH, Math.max(1, viewportWidth - PANEL_MARGIN * 2));
-    const minHeight = Math.min(PANEL_MIN_HEIGHT, Math.max(1, viewportHeight - PANEL_MARGIN * 2));
+    const panelMinWidth = getPanelMinWidth();
+    const panelMinHeight = getPanelMinHeight();
+    const viewportWidth = Math.max(window.innerWidth || 0, panelMinWidth);
+    const viewportHeight = Math.max(window.innerHeight || 0, panelMinHeight);
+    const minWidth = Math.min(panelMinWidth, Math.max(1, viewportWidth - PANEL_MARGIN * 2));
+    const minHeight = Math.min(panelMinHeight, Math.max(1, viewportHeight - PANEL_MARGIN * 2));
     let left = state.startLeft;
     let top = state.startTop;
     let width = state.startWidth;
@@ -676,16 +803,18 @@
   }
 
   function constrainPanelSize(size) {
-    const viewportWidth = Math.max(window.innerWidth || 0, PANEL_MIN_WIDTH);
-    const viewportHeight = Math.max(window.innerHeight || 0, PANEL_MIN_HEIGHT);
+    const panelMinWidth = getPanelMinWidth();
+    const panelMinHeight = getPanelMinHeight();
+    const viewportWidth = Math.max(window.innerWidth || 0, panelMinWidth);
+    const viewportHeight = Math.max(window.innerHeight || 0, panelMinHeight);
     const maxWidth = Math.max(1, viewportWidth - PANEL_MARGIN * 2);
     const maxHeight = Math.max(1, viewportHeight - PANEL_MARGIN * 2);
-    const minWidth = Math.min(PANEL_MIN_WIDTH, maxWidth);
-    const minHeight = Math.min(PANEL_MIN_HEIGHT, maxHeight);
+    const minWidth = Math.min(panelMinWidth, maxWidth);
+    const minHeight = Math.min(panelMinHeight, maxHeight);
 
     return {
-      width: clampNumber(Number(size?.width) || PANEL_MIN_WIDTH, minWidth, maxWidth),
-      height: clampNumber(Number(size?.height) || PANEL_MIN_HEIGHT, minHeight, maxHeight)
+      width: clampNumber(Number(size?.width) || panelMinWidth, minWidth, maxWidth),
+      height: clampNumber(Number(size?.height) || panelMinHeight, minHeight, maxHeight)
     };
   }
 
@@ -711,7 +840,7 @@
       return;
     }
 
-    const width = panelSize?.width || panelEl.getBoundingClientRect().width || PANEL_MIN_WIDTH;
+    const width = panelSize?.width || panelEl.getBoundingClientRect().width || getPanelMinWidth();
     panelEl.dataset.compactWidth = String(width <= PANEL_COMPACT_WIDTH);
   }
 
@@ -2819,6 +2948,8 @@
     statusEl = null;
     addSectionNameInput = null;
     editModeCheckbox = null;
+    panelFontSizeInput = null;
+    panelFontSizeValueEl = null;
     panelDragState = null;
     panelResizeState = null;
     remoteSectionEl = null;
